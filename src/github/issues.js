@@ -1,0 +1,34 @@
+const PLAN_TRIGGER_ACTIONS = new Set(["opened", "reopened", "edited"]);
+
+export function shouldPlanIssue(eventName, payload) {
+  return eventName === "issues" && PLAN_TRIGGER_ACTIONS.has(payload.action);
+}
+
+export function issueEventToPlanningInput(payload) {
+  const issue = payload.issue || {};
+  const repository = payload.repository || {};
+  const owner = repository.owner || {};
+
+  return {
+    source: "github",
+    action: payload.action,
+    issue: {
+      id: issue.id,
+      number: issue.number,
+      title: issue.title || "",
+      body: issue.body || "",
+      url: issue.html_url || issue.url || "",
+      labels: Array.isArray(issue.labels) ? issue.labels.map((label) => label.name).filter(Boolean) : [],
+      author: issue.user?.login || ""
+    },
+    repository: {
+      id: repository.id,
+      name: repository.name || "",
+      fullName: repository.full_name || "",
+      owner: owner.login || repository.owner?.name || "",
+      defaultBranch: repository.default_branch || "main",
+      cloneUrl: repository.clone_url || "",
+      htmlUrl: repository.html_url || ""
+    }
+  };
+}
