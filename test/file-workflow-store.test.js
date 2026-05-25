@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createWorkflowStore } from "../src/workflows/fileStore.js";
@@ -56,6 +56,37 @@ test("creates memory workflow store when configured", () => {
   });
 
   assert.equal(store.list().length, 1);
+});
+
+test("writes append-only audit log entries when configured", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-sde-audit-"));
+  const auditLogPath = path.join(root, "audit.jsonl");
+  const store = createWorkflowStore({
+    workflowStoreProvider: "memory",
+    auditLogProvider: "file",
+    auditLogPath
+  });
+
+  const workflow = store.createFromPlan({
+    planningInput: planningInput(),
+    plan: {
+      provider: "mock"
+    }
+  });
+  store.approve(workflow.id, {
+    reviewer: "sam"
+  });
+
+  const entries = (await readFile(auditLogPath, "utf8"))
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => JSON.parse(line));
+
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].workflowId, "acme/app#issue-42");
+  assert.equal(entries[0].event.type, "plan_generated");
+  assert.equal(entries[1].status, "approved");
+  assert.equal(entries[1].event.type, "plan_approved");
 });
 
 test("rejects unsupported workflow store providers", () => {

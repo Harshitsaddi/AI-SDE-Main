@@ -1,12 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { CommandError } from "../src/system/commandRunner.js";
+import { loadConfig } from "../src/config.js";
 import { parseCommandLine } from "../src/validation/commandLine.js";
 import { runLocalValidation } from "../src/validation/localValidationService.js";
 import { runMockValidation } from "../src/validation/mockValidationService.js";
+import { validationCommandsForWorkflow } from "../src/validation/validationCommands.js";
 
 function workflow(commands = ["npm test", "npm run lint"]) {
   return {
+    planningInput: {
+      repository: {
+        fullName: "acme/app"
+      }
+    },
     workspace: {
       path: "C:\\repo"
     },
@@ -35,6 +42,7 @@ test("parses validation commands without shell execution", () => {
 
 test("mock validation records skipped commands", async () => {
   const validation = await runMockValidation({
+    config: {},
     workflow: workflow(["npm test"])
   });
 
@@ -44,11 +52,41 @@ test("mock validation records skipped commands", async () => {
   assert.equal(validation.results[0].status, "skipped");
 });
 
+test("validation command overrides replace detected commands", () => {
+  const config = loadConfig({
+    VALIDATION_COMMAND_OVERRIDES: JSON.stringify({
+      "acme/app": ["npm run ci", "npm run ci", "npm run lint"],
+      "*": ["npm test"]
+    })
+  });
+
+  const commands = validationCommandsForWorkflow(workflow(["npm test"]), config);
+
+  assert.deepEqual(commands, ["npm run ci", "npm run lint"]);
+});
+
+test("wildcard validation command overrides apply when repository is not configured", () => {
+  const config = loadConfig({
+    VALIDATION_COMMAND_OVERRIDES: JSON.stringify({
+      "*": ["npm run verify"]
+    })
+  });
+  const targetWorkflow = workflow(["npm test"]);
+  targetWorkflow.planningInput.repository.fullName = "acme/other";
+
+  const commands = validationCommandsForWorkflow(targetWorkflow, config);
+
+  assert.deepEqual(commands, ["npm run verify"]);
+});
+
 test("local validation records passing and failing commands", async () => {
   const calls = [];
   const validation = await runLocalValidation({
     config: {
-      validationCommandTimeoutMs: 1000
+      validationCommandTimeoutMs: 1000,
+      validationCommandOverrides: {},
+      validationCommandAllowlist: [],
+      secretRedactionPatterns: ["tenant-secret-[0-9]+"]
     },
     workflow: workflow(["npm test", "npm run lint"]),
     commandRunner: async (command, args, options) => {
@@ -71,7 +109,7 @@ test("local validation records passing and failing commands", async () => {
         args,
         cwd: options.cwd,
         exitCode: 0,
-        stdout: "tests passed",
+        stdout: "tests passed tenant-secret-123",
         stderr: "",
         timedOut: false
       };
@@ -82,13 +120,16 @@ test("local validation records passing and failing commands", async () => {
   assert.equal(validation.passed, false);
   assert.equal(validation.results[0].status, "passed");
   assert.equal(validation.results[1].status, "failed");
+  assert.equal(validation.results[0].stdout, "tests passed [REDACTED]");
   assert.equal(calls[0].options.cwd, "C:\\repo");
 });
 
 test("local validation skips cleanly when no commands are detected", async () => {
   const validation = await runLocalValidation({
     config: {
-      validationCommandTimeoutMs: 1000
+      validationCommandTimeoutMs: 1000,
+      validationCommandOverrides: {},
+      validationCommandAllowlist: []
     },
     workflow: workflow([]),
     commandRunner: async () => {
@@ -99,4 +140,29 @@ test("local validation skips cleanly when no commands are detected", async () =>
   assert.equal(validation.skipped, true);
   assert.equal(validation.passed, null);
   assert.deepEqual(validation.results, []);
+});
+
+test("local validation blocks commands outside the allowlist", async () => {
+  const validation = await runLocalValidation({
+    config: {
+      validationCommandTimeoutMs: 1000,
+      validationCommandOverrides: {},
+      validationCommandAllowlist: ["npm test"]
+    },
+    workflow: workflow(["npm test", "npm run lint"]),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "ok",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(validation.passed, false);
+  assert.equal(validation.results[0].status, "passed");
+  assert.equal(validation.results[1].status, "blocked");
+  assert.match(validation.results[1].stderr, /VALIDATION_COMMAND_ALLOWLIST/);
 });

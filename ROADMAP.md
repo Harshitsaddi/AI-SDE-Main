@@ -2,11 +2,11 @@
 
 ## Progress
 
-Approximate MVP completion: **80%**.
+Approximate MVP completion: **100%**.
 
-Built: issue intake, planning, human approval, branch creation, workspace checkout, repository inspection, mock implementation, diff capture, validation collection, AI review, PR creation, and a small dashboard.
+Built: issue intake, mock and command planning providers, human approval, branch creation, workspace checkout, repository inspection, mock and command implementation providers, diff capture, local/container validation collection, AI review, PR creation, GitHub issue comment commands, audit logging, and a small dashboard.
 
-Remaining MVP-critical work: production-grade GitHub App authentication and a real code-editing provider.
+Remaining production hardening work: indexed database persistence and deeper operational hardening.
 
 ## Done
 
@@ -17,6 +17,7 @@ Remaining MVP-critical work: production-grade GitHub App authentication and a re
 - Added issue and repository metadata extraction for planning.
 - Added a repository context builder stub for the first metadata-only planning slice.
 - Added a mock AI planner that produces deterministic implementation plans.
+- Added command-based AI planner provider for external planning/model tools.
 - Added in-memory workflow storage.
 - Added `awaiting_approval` workflow state after plan generation.
 - Added workflow listing and detail endpoints.
@@ -45,6 +46,7 @@ Remaining MVP-critical work: production-grade GitHub App authentication and a re
 - Added validation provider interface.
 - Added mock validation provider for safe default command collection.
 - Added local validation provider for opt-in workspace command execution.
+- Added container validation provider for Docker-isolated validation execution.
 - Added validation success and failure workflow states.
 - Added review provider interface.
 - Added mock AI review pass for diff and validation metadata.
@@ -54,6 +56,19 @@ Remaining MVP-critical work: production-grade GitHub App authentication and a re
 - Added token-based GitHub pull request creation.
 - Added pull request success and failure workflow states.
 - Added durable file-backed workflow persistence.
+- Added retry controls for failed branch, workspace, inspection, implementation, diff, validation, review, and PR stages.
+- Added dashboard detail views for workflow plan, inspection, implementation, diff, validation, review, and PR output.
+- Added configurable per-repository validation command overrides.
+- Added GitHub issue comment publishing for plans and workflow status updates.
+- Added `/ai approve` and `/ai reject` issue comment command support.
+- Added GitHub App installation token authentication for GitHub API providers.
+- Added append-only JSONL audit logging for workflow lifecycle events.
+- Added command-based implementation provider for local coding agents.
+- Added optional Docker wrapper for command-based implementation.
+- Added Dockerfile, Compose packaging, and deployment notes.
+- Added configurable command allowlists for implementation and local validation.
+- Added secret redaction for persisted implementation and validation command output.
+- Added multi-repository configuration overrides.
 - Added `.gitignore` entries for local runtime output and secrets.
 - Added tests for webhook signature validation.
 - Added tests for issue webhook workflow creation.
@@ -69,22 +84,20 @@ Remaining MVP-critical work: production-grade GitHub App authentication and a re
 - Added tests for mock review findings and review failure routing.
 - Added tests for pull request body generation, mock PR output, GitHub PR API calls, and PR failure routing.
 - Added tests for workflow persistence reloads, memory store mode, and unsupported store config.
+- Added tests for retry event recording and resuming a failed workflow stage.
+- Added tests for validation command overrides.
+- Added tests for issue comment publishing and comment-command approval/rejection.
+- Added tests for GitHub App JWT signing and installation token exchange.
+- Added tests for file-backed audit log entries.
+- Added tests for command implementation prompt creation and command execution.
+- Added tests for command allowlist policy enforcement.
+- Added tests for default and custom secret redaction.
+- Added tests for repository-specific config merging.
+- Added tests for command planner output parsing and policy enforcement.
+- Added tests for container validation and implementation Docker wrapping.
 - Added local run and endpoint documentation.
 
 ## Next In Order
 
 1. Add SQLite or PostgreSQL persistence upgrade for indexed workflow querying.
-2. Add failure retry controls for branch, workspace, implementation, diff, validation, review, and PR stages.
-3. Add dashboard detail views for plan, inspection, implementation, diff, validation, review, and PR output.
-4. Add GitHub issue comments for plan publishing and workflow status updates.
-5. Add `/ai approve` and `/ai reject` comment command support.
-6. Add configurable per-repository validation command overrides.
-7. Add first real implementation provider, such as Aider, Claude Code, or an OpenAI tool-calling agent.
-8. Add GitHub App authentication and replace token-based branch/PR providers.
-9. Add audit log persistence for prompts, decisions, commands, outputs, diffs, and review results.
-10. Add sandboxed validation execution using containers.
-11. Add container isolation for implementation worker jobs.
-12. Add secret handling and policy controls.
-13. Add multi-repository configuration.
-14. Add provider abstraction for multiple model vendors.
-15. Add production deployment configuration.
+2. Add deeper operational hardening for production scale.

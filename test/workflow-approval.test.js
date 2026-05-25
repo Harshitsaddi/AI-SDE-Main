@@ -59,3 +59,29 @@ test("does not approve a workflow twice", () => {
   assert.equal(result.ok, false);
   assert.equal(result.reason, "workflow_not_awaiting_approval");
 });
+
+test("records retry requests for failed workflows", () => {
+  const store = new WorkflowStore();
+  const workflow = createWorkflow(store);
+
+  store.markValidationFailed(workflow.id, new Error("Validation runner crashed"));
+  const result = store.requestRetry(workflow.id, {
+    reviewer: "sam",
+    comment: "Runner is back online."
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, "validation");
+  assert.equal(result.workflow.retries[0].reviewer, "sam");
+  assert.equal(result.workflow.events.at(-1).type, "retry_requested");
+});
+
+test("does not retry non-failed workflows", () => {
+  const store = new WorkflowStore();
+  const workflow = createWorkflow(store);
+
+  const result = store.requestRetry(workflow.id, { reviewer: "sam" });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "workflow_not_retryable");
+});

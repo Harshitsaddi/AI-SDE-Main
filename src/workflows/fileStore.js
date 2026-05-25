@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { createAuditLogger } from "../audit/auditLog.js";
 import { WorkflowStore } from "./store.js";
 
 function readWorkflows(filePath) {
@@ -22,15 +23,18 @@ function writeWorkflows(filePath, workflows) {
 }
 
 export function createWorkflowStore(config) {
+  const onAudit = createAuditLogger(config);
+
   if (config.workflowStoreProvider === "memory") {
-    return new WorkflowStore();
+    return new WorkflowStore({ onAudit });
   }
 
   if (config.workflowStoreProvider === "file") {
     const filePath = path.resolve(config.workflowStorePath);
     return new WorkflowStore({
       workflows: readWorkflows(filePath),
-      onChange: (workflows) => writeWorkflows(filePath, workflows)
+      onChange: (workflows) => writeWorkflows(filePath, workflows),
+      onAudit
     });
   }
 

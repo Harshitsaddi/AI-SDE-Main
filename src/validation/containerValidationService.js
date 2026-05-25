@@ -1,12 +1,17 @@
-import { CommandError, runCommand } from "../system/commandRunner.js";
+import { dockerRunArgs } from "../system/containerCommand.js";
 import { isCommandAllowed } from "../system/commandPolicy.js";
+import { CommandError, runCommand } from "../system/commandRunner.js";
 import { redactSecrets } from "../system/redaction.js";
 import { parseCommandLine } from "./commandLine.js";
 import { validationCommandsForWorkflow } from "./validationCommands.js";
 
-export async function runLocalValidation({ config, workflow, commandRunner = runCommand }) {
+export async function runContainerValidation({ config, workflow, commandRunner = runCommand }) {
   if (!workflow.workspace?.path) {
-    throw new Error("Workflow workspace path is required for validation");
+    throw new Error("Workflow workspace path is required for container validation");
+  }
+
+  if (!config.validationContainerImage) {
+    throw new Error("VALIDATION_CONTAINER_IMAGE is required when VALIDATION_PROVIDER=container");
   }
 
   const commands = validationCommandsForWorkflow(workflow, config);
@@ -14,9 +19,10 @@ export async function runLocalValidation({ config, workflow, commandRunner = run
 
   if (!commands.length) {
     return {
-      provider: "local",
+      provider: "container",
       passed: null,
       skipped: true,
+      image: config.validationContainerImage,
       commands,
       results,
       summary: "No validation commands were detected."
@@ -39,9 +45,17 @@ export async function runLocalValidation({ config, workflow, commandRunner = run
     }
 
     const parsed = parseCommandLine(commandLine);
+    const dockerArgs = dockerRunArgs({
+      image: config.validationContainerImage,
+      workspacePath: workflow.workspace.path,
+      containerWorkdir: config.validationContainerWorkdir,
+      extraArgs: config.validationContainerExtraArgs,
+      command: parsed.command,
+      args: parsed.args
+    });
 
     try {
-      const result = await commandRunner(parsed.command, parsed.args, {
+      const result = await commandRunner("docker", dockerArgs, {
         cwd: workflow.workspace.path,
         timeoutMs: config.validationCommandTimeoutMs
       });
@@ -52,7 +66,11 @@ export async function runLocalValidation({ config, workflow, commandRunner = run
         exitCode: result.exitCode,
         stdout: redactSecrets(result.stdout, config.secretRedactionPatterns),
         stderr: redactSecrets(result.stderr, config.secretRedactionPatterns),
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        container: {
+          image: config.validationContainerImage,
+          args: dockerArgs
+        }
       });
     } catch (error) {
       if (error instanceof CommandError) {
@@ -62,7 +80,11 @@ export async function runLocalValidation({ config, workflow, commandRunner = run
           exitCode: error.exitCode,
           stdout: redactSecrets(error.stdout, config.secretRedactionPatterns),
           stderr: redactSecrets(error.stderr, config.secretRedactionPatterns),
-          durationMs: Date.now() - startedAt
+          durationMs: Date.now() - startedAt,
+          container: {
+            image: config.validationContainerImage,
+            args: dockerArgs
+          }
         });
         continue;
       }
@@ -74,11 +96,12 @@ export async function runLocalValidation({ config, workflow, commandRunner = run
   const passed = results.every((result) => result.status === "passed");
 
   return {
-    provider: "local",
+    provider: "container",
     passed,
     skipped: false,
+    image: config.validationContainerImage,
     commands,
     results,
-    summary: `${results.filter((result) => result.status === "passed").length}/${commands.length} validation command(s) passed.`
+    summary: `${results.filter((result) => result.status === "passed").length}/${commands.length} validation command(s) passed in container.`
   };
 }

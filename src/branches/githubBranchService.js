@@ -1,4 +1,5 @@
-import { createGitHubClient, GitHubApiError } from "../github/client.js";
+import { createGitHubClientFromConfig } from "../github/auth.js";
+import { GitHubApiError } from "../github/client.js";
 import { splitRepositoryFullName } from "../github/repositories.js";
 import { sanitizeBranchName } from "./branchNames.js";
 
@@ -7,11 +8,7 @@ export async function createGitHubBranch({ config, workflow, fetchImpl }) {
   const { owner, repo } = splitRepositoryFullName(repository.fullName);
   const branchName = sanitizeBranchName(workflow.plan.proposedBranchName);
   const baseBranch = repository.defaultBranch;
-  const client = createGitHubClient({
-    token: config.githubToken,
-    apiBaseUrl: config.githubApiBaseUrl,
-    fetchImpl
-  });
+  const client = await createGitHubClientFromConfig({ config, fetchImpl });
 
   const baseRef = await client.getRef({
     owner,

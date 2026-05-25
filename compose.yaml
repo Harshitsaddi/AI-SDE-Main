@@ -1,0 +1,15 @@
+services:
+  ai-sde:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    volumes:
+      - ai-sde-data:/app/var
+      - ai-sde-workspaces:/app/var/workspaces
+    restart: unless-stopped
+
+volumes:
+  ai-sde-data:
+  ai-sde-workspaces:

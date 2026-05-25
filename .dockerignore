@@ -1,0 +1,6 @@
+.git
+.env
+codexgit
+node_modules
+var
+npm-debug.log

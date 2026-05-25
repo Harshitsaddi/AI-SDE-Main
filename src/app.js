@@ -2,10 +2,17 @@ import { createServer } from "node:http";
 import { URL } from "node:url";
 import { generatePlan } from "./ai/planner.js";
 import { createBranch } from "./branches/branchService.js";
-import { loadConfig } from "./config.js";
+import { publishIssueComment } from "./comments/issueCommentService.js";
+import { configForRepository, loadConfig } from "./config.js";
 import { buildRepositoryContext } from "./context/repositoryContext.js";
 import { captureDiff } from "./diff/diffService.js";
-import { issueEventToPlanningInput, shouldPlanIssue } from "./github/issues.js";
+import {
+  issueCommentCommand,
+  issueCommentEventToWorkflowId,
+  issueEventToPlanningInput,
+  shouldHandleIssueComment,
+  shouldPlanIssue
+} from "./github/issues.js";
 import { verifyGitHubSignature } from "./github/signature.js";
 import { sendHtml } from "./http/html.js";
 import { readJsonRequest, sendJson } from "./http/json.js";
@@ -28,12 +35,104 @@ export function createApp({
   diffService = captureDiff,
   validationService = runValidation,
   reviewService = runReview,
-  pullRequestService = createPullRequest
+  pullRequestService = createPullRequest,
+  issueCommentService = publishIssueComment
 }) {
   const appConfig = {
     ...loadConfig({}),
     ...config
   };
+  const pipelineStages = [
+    "branch",
+    "workspace",
+    "inspection",
+    "implementation",
+    "diff",
+    "validation",
+    "review",
+    "pullRequest"
+  ];
+
+  function configForWorkflow(workflow) {
+    return configForRepository(appConfig, workflow.planningInput?.repository?.fullName);
+  }
+
+  async function runWorkflowPipeline(id, startStage = "branch") {
+    const startIndex = pipelineStages.indexOf(startStage);
+
+    if (startIndex === -1) {
+      throw new Error(`Unsupported workflow stage: ${startStage}`);
+    }
+
+    let activeStage = startStage;
+
+    try {
+      for (const stage of pipelineStages.slice(startIndex)) {
+        activeStage = stage;
+        const workflow = store.get(id);
+        const workflowConfig = configForWorkflow(workflow);
+
+        if (stage === "branch") {
+          const branch = await branchService({ config: workflowConfig, workflow });
+          store.markBranchCreated(id, branch);
+        } else if (stage === "workspace") {
+          const workspace = await workspaceService({ config: workflowConfig, workflow });
+          store.markWorkspacePrepared(id, workspace);
+        } else if (stage === "inspection") {
+          const repositoryInspection = await inspectionService({ config: workflowConfig, workflow });
+          store.markRepositoryInspected(id, repositoryInspection);
+        } else if (stage === "implementation") {
+          const implementation = await implementationService({ config: workflowConfig, workflow });
+          store.markImplementationCompleted(id, implementation);
+        } else if (stage === "diff") {
+          const diff = await diffService({ config: workflowConfig, workflow });
+          store.markDiffCaptured(id, diff);
+        } else if (stage === "validation") {
+          const validation = await validationService({ config: workflowConfig, workflow });
+          store.markValidationCompleted(id, validation);
+        } else if (stage === "review") {
+          const review = await reviewService({ config: workflowConfig, workflow });
+          store.markReviewCompleted(id, review);
+        } else if (stage === "pullRequest") {
+          const pullRequest = await pullRequestService({ config: workflowConfig, workflow });
+          store.markPullRequestCreated(id, pullRequest);
+        }
+      }
+    } catch (error) {
+      if (activeStage === "branch") {
+        store.markBranchCreationFailed(id, error);
+      } else if (activeStage === "workspace") {
+        store.markWorkspacePreparationFailed(id, error);
+      } else if (activeStage === "inspection") {
+        store.markRepositoryInspectionFailed(id, error);
+      } else if (activeStage === "implementation") {
+        store.markImplementationFailed(id, error);
+      } else if (activeStage === "diff") {
+        store.markDiffCaptureFailed(id, error);
+      } else if (activeStage === "validation") {
+        store.markValidationFailed(id, error);
+      } else if (activeStage === "review") {
+        store.markReviewFailed(id, error);
+      } else if (activeStage === "pullRequest") {
+        store.markPullRequestCreationFailed(id, error);
+      }
+    }
+  }
+
+  async function publishWorkflowComment(id, kind) {
+    const workflow = store.get(id);
+
+    if (!workflow || appConfig.issueCommentProvider === "none") {
+      return;
+    }
+
+    try {
+      const comment = await issueCommentService({ config: configForWorkflow(workflow), workflow, kind });
+      store.markIssueCommentPublished(id, comment);
+    } catch (error) {
+      store.markIssueCommentFailed(id, error);
+    }
+  }
 
   async function handleGitHubWebhook(request, response) {
     let parsed;
@@ -60,6 +159,12 @@ export function createApp({
     const payload = parsed.body;
 
     if (!shouldPlanIssue(eventName, payload)) {
+      if (shouldHandleIssueComment(eventName, payload)) {
+        const result = await handleIssueCommentCommand(payload);
+        sendJson(response, result.statusCode, result.body);
+        return;
+      }
+
       sendJson(response, 202, {
         status: "ignored",
         reason: "event_does_not_create_plan",
@@ -70,9 +175,11 @@ export function createApp({
     }
 
     const planningInput = issueEventToPlanningInput(payload);
+    const planningConfig = configForRepository(appConfig, planningInput.repository.fullName);
     const repositoryContext = await buildRepositoryContext(planningInput);
-    const plan = await generatePlan({ config: appConfig, planningInput, repositoryContext });
+    const plan = await generatePlan({ config: planningConfig, planningInput, repositoryContext });
     const workflow = store.createFromPlan({ planningInput, plan });
+    await publishWorkflowComment(workflow.id, "plan");
 
     sendJson(response, 201, {
       status: workflow.status,
@@ -106,68 +213,90 @@ export function createApp({
     }
 
     if (decision === "approve") {
-      try {
-        const branch = await branchService({ config: appConfig, workflow: result.workflow });
-        const branchResult = store.markBranchCreated(id, branch);
-        const workspace = await workspaceService({ config: appConfig, workflow: branchResult.workflow });
-        const workspaceResult = store.markWorkspacePrepared(id, workspace);
-        const repositoryInspection = await inspectionService({
-          config: appConfig,
-          workflow: workspaceResult.workflow
-        });
-        const inspectionResult = store.markRepositoryInspected(id, repositoryInspection);
-        const implementation = await implementationService({
-          config: appConfig,
-          workflow: inspectionResult.workflow
-        });
-        const implementationResult = store.markImplementationCompleted(id, implementation);
-        const diff = await diffService({
-          config: appConfig,
-          workflow: implementationResult.workflow
-        });
-        const diffResult = store.markDiffCaptured(id, diff);
-        const validation = await validationService({
-          config: appConfig,
-          workflow: diffResult.workflow
-        });
-        const validationResult = store.markValidationCompleted(id, validation);
-        const review = await reviewService({
-          config: appConfig,
-          workflow: validationResult.workflow
-        });
-        const reviewResult = store.markReviewCompleted(id, review);
-        const pullRequest = await pullRequestService({
-          config: appConfig,
-          workflow: reviewResult.workflow
-        });
-        store.markPullRequestCreated(id, pullRequest);
-      } catch (error) {
-        const latestWorkflow = store.get(id);
+      await runWorkflowPipeline(id);
+    }
+    await publishWorkflowComment(id, "status");
 
-        if (latestWorkflow?.status === "review_completed") {
-          store.markPullRequestCreationFailed(id, error);
-        } else if (latestWorkflow?.status === "validation_completed") {
-          store.markReviewFailed(id, error);
-        } else if (latestWorkflow?.status === "diff_captured") {
-          store.markValidationFailed(id, error);
-        } else if (latestWorkflow?.status === "implementation_completed") {
-          store.markDiffCaptureFailed(id, error);
-        } else if (latestWorkflow?.status === "repository_inspected") {
-          store.markImplementationFailed(id, error);
-        } else if (latestWorkflow?.status === "workspace_prepared") {
-          store.markRepositoryInspectionFailed(id, error);
-        } else if (latestWorkflow?.status === "branch_created") {
-          store.markWorkspacePreparationFailed(id, error);
-        } else {
-          store.markBranchCreationFailed(id, error);
-        }
-      }
+    const workflow = store.get(id);
+    sendJson(response, 200, {
+      status: workflow.status,
+      workflow
+    });
+  }
+
+  async function handleWorkflowRetry(request, response, id) {
+    let parsed;
+
+    try {
+      parsed = await readJsonRequest(request);
+    } catch (error) {
+      sendJson(response, 400, { error: "invalid_json", message: error.message });
+      return;
     }
 
+    const result = store.requestRetry(id, parsed.body || {});
+
+    if (!result.ok) {
+      const statusCode = result.reason === "workflow_not_found" ? 404 : 409;
+      sendJson(response, statusCode, {
+        error: result.reason,
+        workflow: result.workflow || null
+      });
+      return;
+    }
+
+    await runWorkflowPipeline(id, result.stage);
+    await publishWorkflowComment(id, "status");
+
+    const workflow = store.get(id);
     sendJson(response, 200, {
-      status: result.workflow.status,
-      workflow: result.workflow
+      status: workflow.status,
+      workflow
     });
+  }
+
+  async function handleIssueCommentCommand(payload) {
+    const command = issueCommentCommand(payload);
+
+    if (!command) {
+      return {
+        statusCode: 202,
+        body: {
+          status: "ignored",
+          reason: "comment_is_not_ai_command"
+        }
+      };
+    }
+
+    const id = issueCommentEventToWorkflowId(payload);
+    const reviewer = payload.comment?.user?.login || "github-comment";
+    const result = command === "approve"
+      ? store.approve(id, { reviewer, comment: "Approved from GitHub issue comment." })
+      : store.reject(id, { reviewer, comment: "Rejected from GitHub issue comment." });
+
+    if (!result.ok) {
+      return {
+        statusCode: result.reason === "workflow_not_found" ? 404 : 409,
+        body: {
+          error: result.reason,
+          workflow: result.workflow || null
+        }
+      };
+    }
+
+    if (command === "approve") {
+      await runWorkflowPipeline(id);
+    }
+    await publishWorkflowComment(id, "status");
+
+    const workflow = store.get(id);
+    return {
+      statusCode: 200,
+      body: {
+        status: workflow.status,
+        workflow
+      }
+    };
   }
 
   async function route(request, response) {
@@ -202,6 +331,12 @@ export function createApp({
     const rejectionMatch = url.pathname.match(/^\/workflows\/(.+)\/reject$/);
     if (request.method === "POST" && rejectionMatch) {
       await handleWorkflowDecision(request, response, decodeURIComponent(rejectionMatch[1]), "reject");
+      return;
+    }
+
+    const retryMatch = url.pathname.match(/^\/workflows\/(.+)\/retry$/);
+    if (request.method === "POST" && retryMatch) {
+      await handleWorkflowRetry(request, response, decodeURIComponent(retryMatch[1]));
       return;
     }
 

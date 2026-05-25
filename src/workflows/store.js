@@ -1,18 +1,31 @@
 export class WorkflowStore {
   #workflows = new Map();
   #onChange = null;
+  #onAudit = null;
 
-  constructor({ workflows = [], onChange = null } = {}) {
+  constructor({ workflows = [], onChange = null, onAudit = null } = {}) {
     this.#onChange = onChange;
+    this.#onAudit = onAudit;
 
     for (const workflow of workflows) {
       this.#workflows.set(workflow.id, workflow);
     }
   }
 
-  #save() {
+  #save(workflow = null) {
     if (this.#onChange) {
       this.#onChange(this.list());
+    }
+
+    if (workflow && this.#onAudit) {
+      this.#onAudit({
+        at: new Date().toISOString(),
+        workflowId: workflow.id,
+        status: workflow.status,
+        event: workflow.events.at(-1) || null,
+        repository: workflow.planningInput?.repository?.fullName || "",
+        issueNumber: workflow.planningInput?.issue?.number || null
+      });
     }
   }
 
@@ -38,7 +51,9 @@ export class WorkflowStore {
       validation: null,
       review: null,
       pullRequest: null,
+      issueComments: [],
       approvals: [],
+      retries: [],
       events: [
         {
           at: now,
@@ -49,7 +64,7 @@ export class WorkflowStore {
     };
 
     this.#workflows.set(id, workflow);
-    this.#save();
+    this.#save(workflow);
     return workflow;
   }
 
@@ -89,7 +104,98 @@ export class WorkflowStore {
       message: `Plan approved by ${approvalRecord.reviewer}.`
     });
 
-    this.#save();
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  requestRetry(id, retry = {}) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const retryStageByStatus = {
+      branch_creation_failed: "branch",
+      workspace_preparation_failed: "workspace",
+      repository_inspection_failed: "inspection",
+      implementation_failed: "implementation",
+      diff_capture_failed: "diff",
+      validation_failed: "validation",
+      review_failed: "review",
+      pr_creation_failed: "pullRequest"
+    };
+    const stage = retryStageByStatus[workflow.status];
+
+    if (!stage) {
+      return { ok: false, reason: "workflow_not_retryable", workflow };
+    }
+
+    const now = new Date().toISOString();
+    const retryRecord = {
+      at: now,
+      reviewer: retry.reviewer || "unknown",
+      stage,
+      comment: retry.comment || ""
+    };
+
+    workflow.updatedAt = now;
+    workflow.retries = workflow.retries || [];
+    workflow.retries.push(retryRecord);
+    workflow.events.push({
+      at: now,
+      type: "retry_requested",
+      message: `Retry requested for ${stage} by ${retryRecord.reviewer}.`
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow, stage };
+  }
+
+  markIssueCommentPublished(id, comment) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.updatedAt = now;
+    workflow.issueComments = workflow.issueComments || [];
+    workflow.issueComments.push({
+      ...comment,
+      publishedAt: now
+    });
+    workflow.events.push({
+      at: now,
+      type: "issue_comment_published",
+      message: comment.created
+        ? `Issue comment ${comment.url || ""} published.`.trim()
+        : "Mock issue comment prepared."
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markIssueCommentFailed(id, error) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.updatedAt = now;
+    workflow.events.push({
+      at: now,
+      type: "issue_comment_failed",
+      message: error.message
+    });
+
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -114,7 +220,7 @@ export class WorkflowStore {
       message: `Branch ${branch.branchName} created from ${branch.baseBranch}.`
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -135,7 +241,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -160,7 +266,7 @@ export class WorkflowStore {
       message: `Workspace prepared at ${workspace.path}.`
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -181,7 +287,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -208,7 +314,7 @@ export class WorkflowStore {
         : `Repository inspection skipped: ${repositoryInspection.reason}.`
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -229,7 +335,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -256,7 +362,7 @@ export class WorkflowStore {
         : "Mock implementation completed without applying code changes."
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -277,7 +383,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -304,7 +410,7 @@ export class WorkflowStore {
         : `Diff capture skipped: ${diff.reason}.`
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -325,7 +431,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -350,7 +456,7 @@ export class WorkflowStore {
       message: validation.summary
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -371,7 +477,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -396,7 +502,7 @@ export class WorkflowStore {
       message: review.summary
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -417,7 +523,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -444,7 +550,7 @@ export class WorkflowStore {
         : "Mock pull request prepared."
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -465,7 +571,7 @@ export class WorkflowStore {
       message: error.message
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 
@@ -497,7 +603,7 @@ export class WorkflowStore {
       message: `Plan rejected by ${rejectionRecord.reviewer}.`
     });
 
-    this.#save();
+    this.#save(workflow);
     return { ok: true, workflow };
   }
 }

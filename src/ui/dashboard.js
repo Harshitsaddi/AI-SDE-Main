@@ -116,6 +116,76 @@ export function dashboardHtml() {
         background: var(--panel);
       }
 
+      .detail {
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .detail[hidden] {
+        display: none;
+      }
+
+      .detail-header,
+      .detail-section {
+        border-bottom: 1px solid var(--line);
+        padding: 16px;
+      }
+
+      .detail-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .detail-section:last-child {
+        border-bottom: 0;
+      }
+
+      .detail h2,
+      .detail h3 {
+        margin: 0;
+        letter-spacing: 0;
+      }
+
+      .detail h2 {
+        font-size: 18px;
+      }
+
+      .detail h3 {
+        margin-bottom: 8px;
+        font-size: 13px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+
+      .kv {
+        display: grid;
+        gap: 4px;
+      }
+
+      .kv span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      pre {
+        overflow-x: auto;
+        margin: 0;
+        border-radius: 6px;
+        background: #f1f3f4;
+        padding: 12px;
+        white-space: pre-wrap;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -214,9 +284,11 @@ export function dashboardHtml() {
       <section class="table-shell" aria-label="Workflows">
         <div id="app" class="empty">Loading workflows...</div>
       </section>
+      <section id="detail" class="detail" aria-label="Workflow detail" hidden></section>
     </main>
     <script>
       const app = document.getElementById("app");
+      const detail = document.getElementById("detail");
       const summary = document.getElementById("summary");
       const reviewer = document.getElementById("reviewer");
 
@@ -224,6 +296,19 @@ export function dashboardHtml() {
         if (status.includes("failed") || status.includes("rejected")) return "failed";
         if (["pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
         return "";
+      }
+
+      function isRetryable(status) {
+        return [
+          "branch_creation_failed",
+          "workspace_preparation_failed",
+          "repository_inspection_failed",
+          "implementation_failed",
+          "diff_capture_failed",
+          "validation_failed",
+          "review_failed",
+          "pr_creation_failed"
+        ].includes(status);
       }
 
       function issueTitle(workflow) {
@@ -247,6 +332,14 @@ export function dashboardHtml() {
           .replace(/'/g, "&#39;");
       }
 
+      function jsonBlock(value) {
+        return html(JSON.stringify(value ?? null, null, 2));
+      }
+
+      function compactList(values) {
+        return values?.length ? values.join(", ") : "None";
+      }
+
       async function decide(id, decision) {
         const response = await fetch("/workflows/" + encodeURIComponent(id) + "/" + decision, {
           method: "POST",
@@ -266,6 +359,76 @@ export function dashboardHtml() {
         await loadWorkflows();
       }
 
+      async function loadWorkflowDetail(id) {
+        detail.hidden = false;
+        detail.innerHTML = '<div class="empty">Loading workflow detail...</div>';
+
+        const response = await fetch("/workflows/" + encodeURIComponent(id));
+        const workflow = await response.json();
+
+        if (!response.ok) {
+          throw new Error(workflow.error || "Could not load workflow detail");
+        }
+
+        renderDetail(workflow);
+      }
+
+      function renderDetail(workflow) {
+        const issue = workflow.planningInput?.issue || {};
+        const repositoryName = repository(workflow);
+        const latestEvent = workflow.events?.at(-1);
+        detail.innerHTML = \`
+          <div class="detail-header">
+            <div>
+              <h2>#\${html(issue.number || "")} \${html(issue.title || "Untitled issue")}</h2>
+              <p><code>\${html(workflow.id)}</code></p>
+            </div>
+            <button type="button" data-close-detail>Close</button>
+          </div>
+          <div class="detail-section">
+            <h3>Overview</h3>
+            <div class="detail-grid">
+              <div class="kv"><span>Repository</span><strong>\${html(repositoryName)}</strong></div>
+              <div class="kv"><span>Status</span><strong>\${html(workflow.status)}</strong></div>
+              <div class="kv"><span>Updated</span><strong>\${html(new Date(workflow.updatedAt).toLocaleString())}</strong></div>
+              <div class="kv"><span>Latest Event</span><strong>\${html(latestEvent?.message || "None")}</strong></div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>Plan</h3>
+            <pre>\${jsonBlock(workflow.plan)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Repository Inspection</h3>
+            <div class="detail-grid">
+              <div class="kv"><span>Tech Stack</span><strong>\${html(compactList(workflow.repositoryInspection?.techStack))}</strong></div>
+              <div class="kv"><span>Validation Commands</span><strong>\${html(compactList(workflow.repositoryInspection?.validationCommands))}</strong></div>
+              <div class="kv"><span>Search Matches</span><strong>\${html(workflow.repositoryInspection?.searchMatches?.length || 0)}</strong></div>
+            </div>
+          </div>
+          <div class="detail-section">
+            <h3>Implementation</h3>
+            <pre>\${jsonBlock(workflow.implementation)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Diff</h3>
+            <pre>\${html(workflow.diff?.diff || workflow.diff?.diffStat || "No diff captured.")}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Validation</h3>
+            <pre>\${jsonBlock(workflow.validation)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Review</h3>
+            <pre>\${jsonBlock(workflow.review)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Pull Request</h3>
+            <pre>\${jsonBlock(workflow.pullRequest)}</pre>
+          </div>
+        \`;
+      }
+
       function render(workflows) {
         summary.textContent = workflows.length + " workflow" + (workflows.length === 1 ? "" : "s");
 
@@ -281,6 +444,7 @@ export function dashboardHtml() {
 
         for (const workflow of workflows) {
           const canDecide = workflow.status === "awaiting_approval";
+          const canRetry = isRetryable(workflow.status);
           const row = document.createElement("tr");
           row.innerHTML = \`
             <td><strong>#\${html(issueNumber(workflow))} \${html(issueTitle(workflow))}</strong><br><code>\${html(workflow.id)}</code></td>
@@ -291,6 +455,8 @@ export function dashboardHtml() {
               <div class="actions">
                 <button class="primary" data-decision="approve" data-id="\${html(workflow.id)}" \${canDecide ? "" : "disabled"}>Approve</button>
                 <button class="danger" data-decision="reject" data-id="\${html(workflow.id)}" \${canDecide ? "" : "disabled"}>Reject</button>
+                <button data-decision="retry" data-id="\${html(workflow.id)}" \${canRetry ? "" : "disabled"}>Retry</button>
+                <button data-view-workflow data-id="\${html(workflow.id)}">View</button>
               </div>
             </td>
           \`;
@@ -314,6 +480,17 @@ export function dashboardHtml() {
 
       document.getElementById("refresh").addEventListener("click", loadWorkflows);
       app.addEventListener("click", async (event) => {
+        const viewButton = event.target.closest("button[data-view-workflow]");
+        if (viewButton) {
+          try {
+            await loadWorkflowDetail(viewButton.dataset.id);
+          } catch (error) {
+            detail.hidden = false;
+            detail.innerHTML = '<div class="error">' + html(error.message) + '</div>';
+          }
+          return;
+        }
+
         const button = event.target.closest("button[data-decision]");
         if (!button) return;
         button.disabled = true;
@@ -323,6 +500,12 @@ export function dashboardHtml() {
         } catch (error) {
           app.className = "error";
           app.textContent = error.message;
+        }
+      });
+      detail.addEventListener("click", (event) => {
+        if (event.target.closest("button[data-close-detail]")) {
+          detail.hidden = true;
+          detail.innerHTML = "";
         }
       });
 

@@ -1,7 +1,7 @@
 import { validationCommandsForWorkflow } from "./validationCommands.js";
 
-export async function runMockValidation({ workflow }) {
-  const commands = validationCommandsForWorkflow(workflow);
+export async function runMockValidation({ config = {}, workflow }) {
+  const commands = validationCommandsForWorkflow(workflow, config);
 
   return {
     provider: "mock",

@@ -52,6 +52,12 @@ export function createGitHubClient({ token, apiBaseUrl = "https://api.github.com
         method: "POST",
         body: JSON.stringify({ title, head, base, body, draft })
       });
+    },
+    createIssueComment({ owner, repo, issueNumber, body }) {
+      return request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body })
+      });
     }
   };
 }

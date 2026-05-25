@@ -1,15 +1,11 @@
-import { createGitHubClient } from "../github/client.js";
+import { createGitHubClientFromConfig } from "../github/auth.js";
 import { splitRepositoryFullName } from "../github/repositories.js";
 import { buildPullRequestBody, buildPullRequestTitle } from "./pullRequestBody.js";
 
 export async function createGitHubPullRequest({ config, workflow, fetchImpl }) {
   const repository = workflow.planningInput.repository;
   const { owner, repo } = splitRepositoryFullName(repository.fullName);
-  const client = createGitHubClient({
-    token: config.githubToken,
-    apiBaseUrl: config.githubApiBaseUrl,
-    fetchImpl
-  });
+  const client = await createGitHubClientFromConfig({ config, fetchImpl });
 
   const pullRequest = await client.createPullRequest({
     owner,

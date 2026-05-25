@@ -29,5 +29,8 @@ test("serves the workflow dashboard at the root path", async () => {
     assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
     assert.match(body, /AI SDE Workflow/);
     assert.match(body, /\/workflows/);
+    assert.match(body, /Workflow detail/);
+    assert.match(body, /data-view-workflow/);
+    assert.match(body, /Repository Inspection/);
   });
 });

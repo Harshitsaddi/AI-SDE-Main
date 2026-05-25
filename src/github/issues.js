@@ -4,6 +4,24 @@ export function shouldPlanIssue(eventName, payload) {
   return eventName === "issues" && PLAN_TRIGGER_ACTIONS.has(payload.action);
 }
 
+export function shouldHandleIssueComment(eventName, payload) {
+  return eventName === "issue_comment" && payload.action === "created";
+}
+
+export function issueCommentCommand(payload) {
+  const body = (payload.comment?.body || "").trim().toLowerCase();
+
+  if (body === "/ai approve") {
+    return "approve";
+  }
+
+  if (body === "/ai reject") {
+    return "reject";
+  }
+
+  return null;
+}
+
 export function issueEventToPlanningInput(payload) {
   const issue = payload.issue || {};
   const repository = payload.repository || {};
@@ -31,4 +49,13 @@ export function issueEventToPlanningInput(payload) {
       htmlUrl: repository.html_url || ""
     }
   };
+}
+
+export function issueCommentEventToWorkflowId(payload) {
+  const repository = payload.repository || {};
+  const issue = payload.issue || {};
+  const fullName = repository.full_name || "unknown-repo";
+  const issueNumber = issue.number || issue.id || "unknown";
+
+  return `${fullName}#issue-${issueNumber}`;
 }

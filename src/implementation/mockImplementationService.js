@@ -1,28 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-
-function candidateFilesFrom(workflow) {
-  const searchMatchFiles = workflow.repositoryInspection?.searchMatches?.map((match) => match.path) || [];
-  const planFiles = workflow.plan.affectedAreas || [];
-
-  return [...new Set([...searchMatchFiles, ...planFiles])]
-    .filter((file) => file && file !== "To be determined after repository checkout")
-    .slice(0, 20);
-}
-
-function validationCommandsFrom(workflow) {
-  const inspectionCommands = workflow.repositoryInspection?.validationCommands || [];
-
-  if (inspectionCommands.length) {
-    return inspectionCommands;
-  }
-
-  return workflow.plan.validationCommands || [];
-}
+import { candidateFilesFromWorkflow, validationCommandsFromWorkflow } from "./implementationContext.js";
 
 export async function runMockImplementation({ workflow }) {
-  const candidateFiles = candidateFilesFrom(workflow);
-  const validationCommands = validationCommandsFrom(workflow);
+  const candidateFiles = candidateFilesFromWorkflow(workflow);
+  const validationCommands = validationCommandsFromWorkflow(workflow);
   const implementation = {
     provider: "mock",
     applied: false,
