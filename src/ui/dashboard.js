@@ -74,13 +74,18 @@ export function dashboardHtml() {
         color: var(--muted);
       }
 
-      input {
+      input,
+      select {
         min-height: 36px;
         border: 1px solid var(--line);
         border-radius: 6px;
         padding: 0 10px;
         color: var(--ink);
         background: var(--panel);
+      }
+
+      input[type="checkbox"] {
+        min-height: 0;
       }
 
       button {
@@ -114,6 +119,53 @@ export function dashboardHtml() {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
+      }
+
+      .settings-shell {
+        margin-bottom: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 16px;
+      }
+
+      .settings-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .settings-header h2 {
+        margin: 0;
+        font-size: 16px;
+        letter-spacing: 0;
+      }
+
+      .settings-grid {
+        display: grid;
+        grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) minmax(220px, 1.3fr) auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .settings-grid label {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .settings-grid .checkbox-label {
+        align-items: center;
+        flex-direction: row;
+        min-height: 36px;
+      }
+
+      .setting-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
       }
 
       .detail {
@@ -238,13 +290,18 @@ export function dashboardHtml() {
       }
 
       .empty,
-      .error {
+      .error,
+      .notice {
         padding: 24px;
         color: var(--muted);
       }
 
       .error {
         color: var(--danger);
+      }
+
+      .notice {
+        padding: 0;
       }
 
       code {
@@ -259,9 +316,14 @@ export function dashboardHtml() {
           flex-direction: column;
         }
 
-        label {
+        label,
+        .settings-header {
           align-items: stretch;
           flex-direction: column;
+        }
+
+        .settings-grid {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -281,6 +343,40 @@ export function dashboardHtml() {
         </label>
         <div id="summary" aria-live="polite"></div>
       </div>
+      <section class="settings-shell" aria-label="AI settings">
+        <div class="settings-header">
+          <h2>AI Settings</h2>
+          <span id="ai-settings-status" class="notice" aria-live="polite"></span>
+        </div>
+        <form id="ai-settings-form" class="settings-grid">
+          <label>
+            Provider
+            <select id="ai-provider">
+              <option value="mock">Mock</option>
+              <option value="openai">ChatGPT / OpenAI</option>
+              <option value="anthropic">Claude / Anthropic</option>
+              <option value="gemini">Gemini / Google</option>
+              <option value="command">Command</option>
+            </select>
+          </label>
+          <label>
+            Model
+            <input id="ai-model" list="ai-models" placeholder="Select or type a model">
+            <datalist id="ai-models"></datalist>
+          </label>
+          <label>
+            API Key
+            <input id="ai-api-key" type="password" autocomplete="off" placeholder="Leave blank to keep saved key">
+          </label>
+          <div class="setting-actions">
+            <label class="checkbox-label">
+              <input id="ai-clear-key" type="checkbox">
+              Clear key
+            </label>
+            <button class="primary" type="submit">Save</button>
+          </div>
+        </form>
+      </section>
       <section class="table-shell" aria-label="Workflows">
         <div id="app" class="empty">Loading workflows...</div>
       </section>
@@ -291,6 +387,14 @@ export function dashboardHtml() {
       const detail = document.getElementById("detail");
       const summary = document.getElementById("summary");
       const reviewer = document.getElementById("reviewer");
+      const aiSettingsForm = document.getElementById("ai-settings-form");
+      const aiProvider = document.getElementById("ai-provider");
+      const aiModel = document.getElementById("ai-model");
+      const aiModels = document.getElementById("ai-models");
+      const aiApiKey = document.getElementById("ai-api-key");
+      const aiClearKey = document.getElementById("ai-clear-key");
+      const aiSettingsStatus = document.getElementById("ai-settings-status");
+      let aiSettings = null;
 
       function statusClass(status) {
         if (status.includes("failed") || status.includes("rejected")) return "failed";
@@ -338,6 +442,81 @@ export function dashboardHtml() {
 
       function compactList(values) {
         return values?.length ? values.join(", ") : "None";
+      }
+
+      function providerLabel(provider) {
+        return {
+          mock: "Mock",
+          command: "Command",
+          openai: "ChatGPT / OpenAI",
+          anthropic: "Claude / Anthropic",
+          gemini: "Gemini / Google"
+        }[provider] || provider;
+      }
+
+      function refreshModelOptions() {
+        const values = aiSettings?.modelsByProvider?.[aiProvider.value] || [];
+        aiModels.innerHTML = values
+          .map((model) => '<option value="' + html(model) + '"></option>')
+          .join("");
+      }
+
+      function selectDefaultModelForProvider() {
+        const values = aiSettings?.modelsByProvider?.[aiProvider.value] || [];
+        if (values.length && !values.includes(aiModel.value)) {
+          aiModel.value = values[0];
+        }
+      }
+
+      function renderAiSettings(settings) {
+        aiSettings = settings;
+        aiProvider.value = settings.provider || "mock";
+        aiModel.value = settings.model || "";
+        aiApiKey.value = "";
+        aiClearKey.checked = false;
+        refreshModelOptions();
+
+        const hasKey = settings.keyConfigured?.[settings.provider];
+        const keyStatus = ["openai", "anthropic", "gemini"].includes(settings.provider)
+          ? (hasKey ? "key configured" : "no key saved")
+          : "no API key needed";
+        aiSettingsStatus.textContent = providerLabel(settings.provider) + (settings.model ? " · " + settings.model : "") + " · " + keyStatus;
+      }
+
+      async function loadAiSettings() {
+        const response = await fetch("/settings/ai");
+        const settings = await response.json();
+
+        if (!response.ok) {
+          throw new Error(settings.error || "Could not load AI settings");
+        }
+
+        renderAiSettings(settings);
+      }
+
+      async function saveAiSettings(event) {
+        event.preventDefault();
+        aiSettingsStatus.textContent = "Saving...";
+
+        const response = await fetch("/settings/ai", {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            provider: aiProvider.value,
+            model: aiModel.value,
+            apiKey: aiApiKey.value,
+            clearApiKey: aiClearKey.checked
+          })
+        });
+        const settings = await response.json();
+
+        if (!response.ok) {
+          throw new Error(settings.message || settings.error || "Could not save AI settings");
+        }
+
+        renderAiSettings(settings);
       }
 
       async function decide(id, decision) {
@@ -479,6 +658,17 @@ export function dashboardHtml() {
       }
 
       document.getElementById("refresh").addEventListener("click", loadWorkflows);
+      aiProvider.addEventListener("change", () => {
+        refreshModelOptions();
+        selectDefaultModelForProvider();
+      });
+      aiSettingsForm.addEventListener("submit", async (event) => {
+        try {
+          await saveAiSettings(event);
+        } catch (error) {
+          aiSettingsStatus.textContent = error.message;
+        }
+      });
       app.addEventListener("click", async (event) => {
         const viewButton = event.target.closest("button[data-view-workflow]");
         if (viewButton) {
@@ -509,6 +699,9 @@ export function dashboardHtml() {
         }
       });
 
+      loadAiSettings().catch((error) => {
+        aiSettingsStatus.textContent = error.message;
+      });
       loadWorkflows();
     </script>
   </body>

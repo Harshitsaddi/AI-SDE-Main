@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { parsePlanJson, validatePlan } from "./planSchema.js";
 import { assertCommandAllowed } from "../system/commandPolicy.js";
 import { runCommand } from "../system/commandRunner.js";
 import { redactSecrets } from "../system/redaction.js";
@@ -40,32 +41,6 @@ function plannerPrompt({ planningInput, repositoryContext }) {
     "",
     "Return a JSON implementation plan with these fields: provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist."
   ].filter(Boolean).join("\n");
-}
-
-function parsePlanJson({ stdout, outputContent }) {
-  const content = outputContent?.trim() || stdout.trim();
-
-  if (!content) {
-    throw new Error("AI command did not return a plan JSON document");
-  }
-
-  return JSON.parse(content);
-}
-
-function validatePlan(plan) {
-  const requiredArrays = ["affectedAreas", "implementationPlan", "validationCommands", "humanReviewChecklist"];
-
-  for (const field of ["issueSummary", "proposedBranchName", "risk"]) {
-    if (typeof plan[field] !== "string" || !plan[field]) {
-      throw new Error(`AI command plan is missing string field: ${field}`);
-    }
-  }
-
-  for (const field of requiredArrays) {
-    if (!Array.isArray(plan[field])) {
-      throw new Error(`AI command plan is missing array field: ${field}`);
-    }
-  }
 }
 
 export async function generateCommandPlan({

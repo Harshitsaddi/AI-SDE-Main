@@ -3,6 +3,7 @@ export function dockerRunArgs({
   workspacePath,
   containerWorkdir = "/workspace",
   extraArgs = [],
+  envKeys = [],
   command,
   args = []
 }) {
@@ -21,6 +22,7 @@ export function dockerRunArgs({
     `${workspacePath}:${containerWorkdir}`,
     "-w",
     containerWorkdir,
+    ...envKeys.flatMap((key) => ["-e", key]),
     ...extraArgs,
     image,
     command,

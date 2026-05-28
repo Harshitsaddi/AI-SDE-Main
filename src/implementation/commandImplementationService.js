@@ -54,6 +54,14 @@ export async function runCommandImplementation({ config, workflow, commandRunner
     workspacePath: workflow.workspace.path,
     workflowId: workflow.id
   });
+  const implementationEnv = {
+    AI_SDE_WORKFLOW_ID: workflow.id,
+    AI_SDE_IMPLEMENTATION_PROMPT: promptPath,
+    AI_SDE_WORKSPACE: workflow.workspace.path,
+    AI_SDE_AI_PROVIDER: config.aiProvider || "",
+    AI_SDE_AI_MODEL: config.aiModel || "",
+    AI_SDE_AI_API_KEY: config.aiApiKey || ""
+  };
   const executionCommand = config.implementationContainerImage ? "docker" : rendered[0];
   const executionArgs = config.implementationContainerImage
     ? dockerRunArgs({
@@ -61,6 +69,7 @@ export async function runCommandImplementation({ config, workflow, commandRunner
       workspacePath: workflow.workspace.path,
       containerWorkdir: config.implementationContainerWorkdir,
       extraArgs: config.implementationContainerExtraArgs,
+      envKeys: Object.keys(implementationEnv),
       command: rendered[0],
       args: rendered.slice(1)
     })
@@ -69,11 +78,7 @@ export async function runCommandImplementation({ config, workflow, commandRunner
   const result = await commandRunner(executionCommand, executionArgs, {
     cwd: workflow.workspace.path,
     timeoutMs: config.implementationCommandTimeoutMs,
-    env: {
-      AI_SDE_WORKFLOW_ID: workflow.id,
-      AI_SDE_IMPLEMENTATION_PROMPT: promptPath,
-      AI_SDE_WORKSPACE: workflow.workspace.path
-    }
+    env: implementationEnv
   });
 
   return {

@@ -37,6 +37,12 @@ Copy `.env.example` into your shell environment and set:
 PORT=3000
 GITHUB_WEBHOOK_SECRET=...
 AI_PROVIDER=mock
+AI_MODEL=
+AI_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+AI_SETTINGS_PATH=var/data/ai-settings.json
 AI_COMMAND=
 AI_COMMAND_ALLOWLIST=
 AI_COMMAND_TIMEOUT_MS=120000
@@ -82,6 +88,8 @@ WORKFLOW_STORE_PATH=var/data/workflows.json
 
 `AI_PROVIDER=mock` returns a deterministic plan and is useful while wiring GitHub and approval UX.
 
+The dashboard includes AI settings for selecting `mock`, `command`, `openai`, `anthropic`, or `gemini`, setting a model, and saving an API key locally. Saved keys are stored at `AI_SETTINGS_PATH` and are not returned to the browser. New workflows use the latest saved dashboard settings. You can also set `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, or provider-specific keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) from the environment.
+
 Set `AI_PROVIDER=command` to call an external planning tool. `AI_COMMAND` is parsed without a shell and may use `{inputPath}`, `{promptPath}`, `{outputPath}`, `{repository}`, and `{issueNumber}` placeholders. The provider writes planning input and prompt files under `AI_COMMAND_WORK_DIR`; the command can either print a plan JSON document to stdout or write it to `{outputPath}`. Use `AI_COMMAND_ALLOWLIST` to restrict allowed command prefixes.
 
 ```text
@@ -103,6 +111,14 @@ Shows a local workflow dashboard with refresh, approval, rejection, and retry ac
 ### `GET /health`
 
 Returns service status.
+
+### `GET /settings/ai`
+
+Returns the active AI planner provider, selected model, supported dashboard options, and whether an API key is configured for each hosted model provider.
+
+### `PUT /settings/ai`
+
+Updates dashboard AI settings. The request can include `provider`, `model`, `apiKey`, and `clearApiKey`. API keys are saved server-side and are never included in the response.
 
 ### `POST /webhooks/github`
 
@@ -153,7 +169,7 @@ Repository inspection runs after workspace preparation. The local inspector scan
 
 `IMPLEMENTATION_PROVIDER=mock` records the implementation plan, candidate files, and validation commands without changing code. It is the adapter seam for a real coding agent provider.
 
-Set `IMPLEMENTATION_PROVIDER=command` to run a local implementation agent in the prepared workspace. `IMPLEMENTATION_COMMAND` is parsed without a shell and may use `{promptPath}`, `{workspacePath}`, and `{workflowId}` placeholders. The provider writes `.ai-sde/implementation-prompt.md` before invoking the command and also exposes `AI_SDE_IMPLEMENTATION_PROMPT`, `AI_SDE_WORKSPACE`, and `AI_SDE_WORKFLOW_ID` environment variables.
+Set `IMPLEMENTATION_PROVIDER=command` to run a local implementation agent in the prepared workspace. `IMPLEMENTATION_COMMAND` is parsed without a shell and may use `{promptPath}`, `{workspacePath}`, and `{workflowId}` placeholders. The provider writes `.ai-sde/implementation-prompt.md` before invoking the command and also exposes `AI_SDE_IMPLEMENTATION_PROMPT`, `AI_SDE_WORKSPACE`, `AI_SDE_WORKFLOW_ID`, `AI_SDE_AI_PROVIDER`, `AI_SDE_AI_MODEL`, and `AI_SDE_AI_API_KEY` environment variables.
 
 Set `IMPLEMENTATION_COMMAND_ALLOWLIST` to a JSON array of allowed command prefixes to restrict command implementation execution:
 
@@ -228,3 +244,5 @@ curl -X POST http://localhost:3000/workflows/acme%2Fapp%23issue-42/retry \
 ```
 
 See [ROADMAP.md](./ROADMAP.md) for completed work and remaining MVP tasks.
+
+For a step-by-step real setup path, see [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md).

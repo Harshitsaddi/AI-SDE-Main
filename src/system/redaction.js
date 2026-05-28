@@ -2,6 +2,8 @@ const DEFAULT_SECRET_PATTERNS = [
   "ghp_[A-Za-z0-9_]{20,}",
   "github_pat_[A-Za-z0-9_]+",
   "sk-[A-Za-z0-9_-]{20,}",
+  "sk-ant-[A-Za-z0-9_-]{20,}",
+  "AIza[0-9A-Za-z_-]{20,}",
   "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
 ];
 

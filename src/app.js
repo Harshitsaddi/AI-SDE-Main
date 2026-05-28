@@ -20,6 +20,7 @@ import { runImplementation } from "./implementation/implementationService.js";
 import { inspectRepository } from "./inspection/inspectionService.js";
 import { createPullRequest } from "./pullRequests/pullRequestService.js";
 import { runReview } from "./review/reviewService.js";
+import { createAiSettingsStore } from "./settings/aiSettingsStore.js";
 import { dashboardHtml } from "./ui/dashboard.js";
 import { runValidation } from "./validation/validationService.js";
 import { WorkflowStore } from "./workflows/store.js";
@@ -36,12 +37,14 @@ export function createApp({
   validationService = runValidation,
   reviewService = runReview,
   pullRequestService = createPullRequest,
-  issueCommentService = publishIssueComment
+  issueCommentService = publishIssueComment,
+  aiSettingsStore
 }) {
   const appConfig = {
     ...loadConfig({}),
     ...config
   };
+  const aiSettings = aiSettingsStore || createAiSettingsStore(appConfig);
   const pipelineStages = [
     "branch",
     "workspace",
@@ -53,8 +56,15 @@ export function createApp({
     "pullRequest"
   ];
 
+  function activeConfig() {
+    return {
+      ...appConfig,
+      ...aiSettings.getConfigOverrides()
+    };
+  }
+
   function configForWorkflow(workflow) {
-    return configForRepository(appConfig, workflow.planningInput?.repository?.fullName);
+    return configForRepository(activeConfig(), workflow.planningInput?.repository?.fullName);
   }
 
   async function runWorkflowPipeline(id, startStage = "branch") {
@@ -122,7 +132,7 @@ export function createApp({
   async function publishWorkflowComment(id, kind) {
     const workflow = store.get(id);
 
-    if (!workflow || appConfig.issueCommentProvider === "none") {
+    if (!workflow || activeConfig().issueCommentProvider === "none") {
       return;
     }
 
@@ -175,7 +185,7 @@ export function createApp({
     }
 
     const planningInput = issueEventToPlanningInput(payload);
-    const planningConfig = configForRepository(appConfig, planningInput.repository.fullName);
+    const planningConfig = configForRepository(activeConfig(), planningInput.repository.fullName);
     const repositoryContext = await buildRepositoryContext(planningInput);
     const plan = await generatePlan({ config: planningConfig, planningInput, repositoryContext });
     const workflow = store.createFromPlan({ planningInput, plan });
@@ -255,6 +265,23 @@ export function createApp({
     });
   }
 
+  async function handleAiSettingsUpdate(request, response) {
+    let parsed;
+
+    try {
+      parsed = await readJsonRequest(request);
+    } catch (error) {
+      sendJson(response, 400, { error: "invalid_json", message: error.message });
+      return;
+    }
+
+    try {
+      sendJson(response, 200, aiSettings.update(parsed.body || {}));
+    } catch (error) {
+      sendJson(response, 400, { error: "invalid_ai_settings", message: error.message });
+    }
+  }
+
   async function handleIssueCommentCommand(payload) {
     const command = issueCommentCommand(payload);
 
@@ -309,6 +336,16 @@ export function createApp({
 
     if (request.method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { status: "ok" });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/settings/ai") {
+      sendJson(response, 200, aiSettings.getPublicSettings());
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/settings/ai") {
+      await handleAiSettingsUpdate(request, response);
       return;
     }
 

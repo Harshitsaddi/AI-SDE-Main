@@ -48,6 +48,9 @@ test("runs a configured implementation command with prompt placeholders", async 
       implementationCommand: "agent --prompt {promptPath} --workspace {workspacePath}",
       implementationCommandAllowlist: ["agent"],
       implementationCommandTimeoutMs: 1000,
+      aiProvider: "openai",
+      aiModel: "gpt-test",
+      aiApiKey: "sk-test-key",
       secretRedactionPatterns: ["tenant-secret-[0-9]+"]
     },
     workflow: currentWorkflow,
@@ -78,6 +81,9 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.equal(calls[0].options.cwd, currentWorkflow.workspace.path);
   assert.equal(calls[0].options.env.AI_SDE_WORKFLOW_ID, "acme/app#issue-42");
   assert.equal(calls[0].options.env.AI_SDE_IMPLEMENTATION_PROMPT, implementation.promptPath);
+  assert.equal(calls[0].options.env.AI_SDE_AI_PROVIDER, "openai");
+  assert.equal(calls[0].options.env.AI_SDE_AI_MODEL, "gpt-test");
+  assert.equal(calls[0].options.env.AI_SDE_AI_API_KEY, "sk-test-key");
   assert.equal(implementation.stdout, "changed files with [REDACTED]");
   assert.equal(implementation.stderr, "[REDACTED]");
   assert.match(prompt, /Fix login crash/);
@@ -146,6 +152,8 @@ test("wraps command implementation in docker when configured", async () => {
   assert.equal(implementation.container.image, "node:22");
   assert.equal(calls[0].command, "docker");
   assert.equal(calls[0].args[0], "run");
+  assert.equal(calls[0].args.includes("-e"), true);
+  assert.equal(calls[0].args.includes("AI_SDE_AI_MODEL"), true);
   assert.equal(calls[0].args.includes("node:22"), true);
   assert.equal(calls[0].args.includes("agent"), true);
 });
