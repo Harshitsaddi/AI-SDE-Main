@@ -1,11 +1,38 @@
 import { createGitHubClientFromConfig } from "../github/auth.js";
 import { splitRepositoryFullName } from "../github/repositories.js";
+import { runCommand } from "../system/commandRunner.js";
 import { buildPullRequestBody, buildPullRequestTitle } from "./pullRequestBody.js";
 
-export async function createGitHubPullRequest({ config, workflow, fetchImpl }) {
+async function pushWorkspaceBranch({ workflow, commandRunner }) {
+  if (!workflow.workspace?.repositoryCheckedOut || !workflow.workspace?.path || !workflow.branch?.branchName) {
+    return null;
+  }
+
+  const result = await commandRunner("git", [
+    "push",
+    "origin",
+    `HEAD:refs/heads/${workflow.branch.branchName}`
+  ], {
+    cwd: workflow.workspace.path
+  });
+
+  return {
+    command: "git",
+    args: result.args,
+    exitCode: result.exitCode
+  };
+}
+
+export async function createGitHubPullRequest({
+  config,
+  workflow,
+  fetchImpl,
+  commandRunner = runCommand
+}) {
   const repository = workflow.planningInput.repository;
   const { owner, repo } = splitRepositoryFullName(repository.fullName);
   const client = await createGitHubClientFromConfig({ config, fetchImpl });
+  const push = await pushWorkspaceBranch({ workflow, commandRunner });
 
   const pullRequest = await client.createPullRequest({
     owner,
@@ -26,6 +53,7 @@ export async function createGitHubPullRequest({ config, workflow, fetchImpl }) {
     head: workflow.branch.branchName,
     base: repository.defaultBranch,
     url: pullRequest.html_url,
-    number: pullRequest.number
+    number: pullRequest.number,
+    push
   };
 }

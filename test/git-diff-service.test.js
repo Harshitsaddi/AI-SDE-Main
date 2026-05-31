@@ -7,6 +7,14 @@ function workflow(repositoryCheckedOut = true) {
     workspace: {
       path: "C:\\repo",
       repositoryCheckedOut
+    },
+    branch: {
+      baseBranch: "main"
+    },
+    planningInput: {
+      repository: {
+        defaultBranch: "main"
+      }
     }
   };
 }
@@ -35,6 +43,22 @@ test("captures empty git diff for a clean workspace", async () => {
     workflow: workflow(),
     commandRunner: async (command, args, options) => {
       calls.push({ command, args, options });
+      if (args[0] === "fetch") {
+        return {
+          stdout: "",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
+      if (args[0] === "diff" && args[1] === "--name-status") {
+        return {
+          stdout: "",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
       return {
         stdout: "",
         stderr: "",
@@ -45,8 +69,8 @@ test("captures empty git diff for a clean workspace", async () => {
 
   assert.equal(diff.captured, true);
   assert.deepEqual(diff.changedFiles, []);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].args, ["status", "--porcelain"]);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls[2].args, ["status", "--porcelain"]);
 });
 
 test("captures changed files, diff stat, and truncated diff", async () => {
@@ -58,6 +82,22 @@ test("captures changed files, diff stat, and truncated diff", async () => {
     workflow: workflow(),
     commandRunner: async (command, args, options) => {
       calls.push({ command, args, options });
+
+      if (args[0] === "fetch") {
+        return {
+          stdout: "",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
+      if (args[0] === "diff" && args[1] === "--name-status") {
+        return {
+          stdout: "",
+          stderr: "",
+          exitCode: 0
+        };
+      }
 
       if (args[0] === "status") {
         return {
@@ -96,5 +136,61 @@ test("captures changed files, diff stat, and truncated diff", async () => {
   assert.equal(diff.diffStat, " src/app.js | 2 ++\n");
   assert.equal(diff.diff, "diff --git a");
   assert.equal(diff.truncated, true);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
+});
+
+test("captures committed branch diff against the base branch", async () => {
+  const calls = [];
+  const diff = await captureGitDiff({
+    config: {
+      diffMaxBytes: 1000
+    },
+    workflow: workflow(),
+    commandRunner: async (command, args, options) => {
+      calls.push({ command, args, options });
+
+      if (args[0] === "fetch") {
+        return {
+          stdout: "",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
+      if (args[0] === "diff" && args[1] === "--name-status") {
+        return {
+          stdout: "M\tsrc/calculator.js\nA\ttests/calculator.test.js\n",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
+      if (args[0] === "diff" && args[1] === "--stat") {
+        return {
+          stdout: " src/calculator.js | 4 ++++\n",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+
+      return {
+        stdout: "diff --git a/src/calculator.js b/src/calculator.js\n",
+        stderr: "",
+        exitCode: 0
+      };
+    }
+  });
+
+  assert.deepEqual(diff.changedFiles, [
+    {
+      status: "M",
+      path: "src/calculator.js"
+    },
+    {
+      status: "A",
+      path: "tests/calculator.test.js"
+    }
+  ]);
+  assert.equal(diff.comparison, "FETCH_HEAD...HEAD");
+  assert.equal(calls.length, 4);
 });

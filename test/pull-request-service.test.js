@@ -123,3 +123,56 @@ test("creates a GitHub pull request through the API", async () => {
     draft: true
   });
 });
+
+test("pushes a checked out workspace branch before creating a GitHub pull request", async () => {
+  const calls = [];
+  const commandCalls = [];
+  const targetWorkflow = {
+    ...workflow(),
+    workspace: {
+      path: "C:\\repo",
+      repositoryCheckedOut: true
+    }
+  };
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return response(201, {
+      number: 12,
+      html_url: "https://github.com/acme/app/pull/12",
+      title: "Fix #42: Fix login crash",
+      body: "body",
+      draft: true
+    });
+  };
+
+  const pullRequest = await createGitHubPullRequest({
+    config: {
+      githubToken: "token",
+      githubApiBaseUrl: "https://api.github.test",
+      prDraft: true
+    },
+    workflow: targetWorkflow,
+    fetchImpl,
+    commandRunner: async (command, args, options) => {
+      commandCalls.push({ command, args, options });
+      return {
+        command,
+        args,
+        cwd: options.cwd,
+        exitCode: 0,
+        stdout: "",
+        stderr: ""
+      };
+    }
+  });
+
+  assert.deepEqual(commandCalls[0], {
+    command: "git",
+    args: ["push", "origin", "HEAD:refs/heads/ai/issue-42"],
+    options: {
+      cwd: "C:\\repo"
+    }
+  });
+  assert.equal(pullRequest.push.exitCode, 0);
+  assert.equal(calls.length, 1);
+});
