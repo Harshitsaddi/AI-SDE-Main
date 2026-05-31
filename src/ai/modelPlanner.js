@@ -14,6 +14,7 @@ function planningPrompt({ planningInput, repositoryContext }) {
     "Return only valid JSON. Do not wrap the JSON in markdown.",
     "The JSON object must contain these fields:",
     "provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist.",
+    "risk must be a string with one of: low, medium, high.",
     "Use short, actionable strings in every array.",
     "",
     `Repository: ${planningInput.repository.fullName}`,
@@ -26,6 +27,63 @@ function planningPrompt({ planningInput, repositoryContext }) {
     "Repository context:",
     JSON.stringify(repositoryContext, null, 2)
   ].filter(Boolean).join("\n");
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function stringArray(value, fallback = []) {
+  if (Array.isArray(value)) {
+    const strings = value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+
+    return strings.length ? strings : fallback;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter(Boolean);
+  }
+
+  return fallback;
+}
+
+function safeBranchName(planningInput) {
+  return `ai/issue-${planningInput.issue.number || planningInput.issue.id || "unknown"}`;
+}
+
+function normalizeModelPlan({ plan, planningInput, repositoryContext }) {
+  return {
+    ...plan,
+    status: firstString(plan.status) || "plan_generated",
+    issueSummary: firstString(plan.issueSummary, plan.summary, planningInput.issue.title),
+    proposedBranchName: firstString(plan.proposedBranchName, plan.branchName) || safeBranchName(planningInput),
+    risk: firstString(plan.risk, plan.riskLevel, plan.riskAssessment) || "medium",
+    affectedAreas: stringArray(
+      plan.affectedAreas,
+      stringArray(plan.files, repositoryContext.candidateFiles || ["To be determined after repository checkout"])
+    ),
+    implementationPlan: stringArray(plan.implementationPlan, [
+      "Inspect the files related to the issue.",
+      "Make the smallest safe change that resolves the issue.",
+      "Add or update focused tests for the changed behavior."
+    ]),
+    validationCommands: stringArray(plan.validationCommands, ["npm test"]),
+    humanReviewChecklist: stringArray(plan.humanReviewChecklist, [
+      "Confirm the implementation matches the issue.",
+      "Confirm validation results are acceptable."
+    ])
+  };
 }
 
 async function parseJsonResponse(response) {
@@ -153,9 +211,13 @@ export async function generateModelPlan({
       ? await callAnthropic({ config, prompt, fetchImpl })
       : await callGemini({ config, prompt, fetchImpl });
 
-  const plan = parsePlanJson({
-    stdout: redactSecrets(content, config.secretRedactionPatterns),
-    outputContent: ""
+  const plan = normalizeModelPlan({
+    plan: parsePlanJson({
+      stdout: redactSecrets(content, config.secretRedactionPatterns),
+      outputContent: ""
+    }),
+    planningInput,
+    repositoryContext
   });
   validatePlan(plan);
 

@@ -85,6 +85,44 @@ test("generates a plan from Anthropic messages", async () => {
   assert.deepEqual(plan.validationCommands, ["npm test"]);
 });
 
+test("normalizes hosted model plans when risk is missing", async () => {
+  const plan = await generateModelPlan({
+    config: {
+      aiProvider: "gemini",
+      aiModel: "gemini-test",
+      aiApiKey: "gemini-key",
+      secretRedactionPatterns: []
+    },
+    planningInput: planningInput(),
+    repositoryContext: { candidateFiles: ["src/auth.js"] },
+    fetchImpl: async () => new Response(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify({
+                  summary: "Fix login crash",
+                  branchName: "ai/fix-login-crash",
+                  files: ["src/auth.js"],
+                  implementationPlan: ["Patch the login flow"],
+                  validationCommands: ["npm test"],
+                  humanReviewChecklist: ["Review auth behavior"]
+                })
+              }
+            ]
+          }
+        }
+      ]
+    }), { status: 200 })
+  });
+
+  assert.equal(plan.risk, "medium");
+  assert.equal(plan.issueSummary, "Fix login crash");
+  assert.equal(plan.proposedBranchName, "ai/fix-login-crash");
+  assert.deepEqual(plan.affectedAreas, ["src/auth.js"]);
+});
+
 test("requires an API key for model providers", async () => {
   await assert.rejects(
     () => generateModelPlan({
