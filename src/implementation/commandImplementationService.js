@@ -17,7 +17,19 @@ function renderCommandParts(parts, values) {
       .replaceAll("{promptPath}", values.promptPath)
       .replaceAll("{workspacePath}", values.workspacePath)
       .replaceAll("{workflowId}", values.workflowId)
+      .replaceAll("{aiProvider}", values.aiProvider)
+      .replaceAll("{aiModel}", values.aiModel)
   ));
+}
+
+function implementationModelName(config) {
+  const model = config.aiModel || "";
+
+  if (config.aiProvider === "gemini" && model.startsWith("gemini-")) {
+    return `gemini/${model}`;
+  }
+
+  return model;
 }
 
 function truncate(value, maxLength = 4000) {
@@ -52,15 +64,29 @@ export async function runCommandImplementation({ config, workflow, commandRunner
   const rendered = renderCommandParts([parsed.command, ...parsed.args], {
     promptPath,
     workspacePath: workflow.workspace.path,
-    workflowId: workflow.id
+    workflowId: workflow.id,
+    aiProvider: config.aiProvider || "",
+    aiModel: implementationModelName(config)
   });
+  const providerEnv = config.aiProvider === "openai"
+    ? { OPENAI_API_KEY: config.aiApiKey || "" }
+    : config.aiProvider === "anthropic"
+      ? { ANTHROPIC_API_KEY: config.aiApiKey || "" }
+      : config.aiProvider === "gemini"
+        ? {
+          GEMINI_API_KEY: config.aiApiKey || "",
+          GOOGLE_API_KEY: config.aiApiKey || "",
+          GOOGLE_GENERATIVE_AI_API_KEY: config.aiApiKey || ""
+        }
+        : {};
   const implementationEnv = {
     AI_SDE_WORKFLOW_ID: workflow.id,
     AI_SDE_IMPLEMENTATION_PROMPT: promptPath,
     AI_SDE_WORKSPACE: workflow.workspace.path,
     AI_SDE_AI_PROVIDER: config.aiProvider || "",
     AI_SDE_AI_MODEL: config.aiModel || "",
-    AI_SDE_AI_API_KEY: config.aiApiKey || ""
+    AI_SDE_AI_API_KEY: config.aiApiKey || "",
+    ...providerEnv
   };
   const executionCommand = config.implementationContainerImage ? "docker" : rendered[0];
   const executionArgs = config.implementationContainerImage

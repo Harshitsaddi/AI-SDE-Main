@@ -162,10 +162,14 @@ Example with Aider:
 
 ```text
 IMPLEMENTATION_PROVIDER=command
-IMPLEMENTATION_COMMAND=aider --message-file {promptPath}
+IMPLEMENTATION_COMMAND=aider --yes --model {aiModel} --message-file {promptPath}
 IMPLEMENTATION_COMMAND_ALLOWLIST=["aider"]
 IMPLEMENTATION_COMMAND_TIMEOUT_MS=600000
 ```
+
+If the command times out, the first thing to check is whether the agent is waiting for confirmation or trying to use a model without the dashboard-selected API key. `--yes` keeps Aider noninteractive, and `{aiModel}` lets the dashboard-selected model flow through directly.
+
+For Gemini, keep the dashboard model as `gemini-2.5-flash` or `gemini-2.5-pro`. The implementation runner passes that to Aider as `gemini/gemini-...`, which uses a normal Google AI Studio `GEMINI_API_KEY` instead of Vertex AI project credentials.
 
 The provider writes:
 

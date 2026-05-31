@@ -171,6 +171,10 @@ Repository inspection runs after workspace preparation. The local inspector scan
 
 Set `IMPLEMENTATION_PROVIDER=command` to run a local implementation agent in the prepared workspace. `IMPLEMENTATION_COMMAND` is parsed without a shell and may use `{promptPath}`, `{workspacePath}`, and `{workflowId}` placeholders. The provider writes `.ai-sde/implementation-prompt.md` before invoking the command and also exposes `AI_SDE_IMPLEMENTATION_PROMPT`, `AI_SDE_WORKSPACE`, `AI_SDE_WORKFLOW_ID`, `AI_SDE_AI_PROVIDER`, `AI_SDE_AI_MODEL`, and `AI_SDE_AI_API_KEY` environment variables.
 
+For Aider specifically, a noninteractive invocation like `aider --yes --model {aiModel} --message-file {promptPath}` is usually the safest starting point.
+
+When the dashboard provider is Gemini and the model is `gemini-...`, `{aiModel}` is passed to Aider as `gemini/gemini-...` so Aider uses the AI Studio `GEMINI_API_KEY` path instead of Vertex AI credentials.
+
 Set `IMPLEMENTATION_COMMAND_ALLOWLIST` to a JSON array of allowed command prefixes to restrict command implementation execution:
 
 Example:

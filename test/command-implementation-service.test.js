@@ -45,7 +45,7 @@ test("runs a configured implementation command with prompt placeholders", async 
   const calls = [];
   const implementation = await runCommandImplementation({
     config: {
-      implementationCommand: "agent --prompt {promptPath} --workspace {workspacePath}",
+      implementationCommand: "agent --model {aiModel} --prompt {promptPath} --workspace {workspacePath}",
       implementationCommandAllowlist: ["agent"],
       implementationCommandTimeoutMs: 1000,
       aiProvider: "openai",
@@ -73,6 +73,8 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.equal(implementation.applied, true);
   assert.equal(calls[0].command, "agent");
   assert.deepEqual(calls[0].args, [
+    "--model",
+    "gpt-test",
     "--prompt",
     implementation.promptPath,
     "--workspace",
@@ -84,6 +86,7 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.equal(calls[0].options.env.AI_SDE_AI_PROVIDER, "openai");
   assert.equal(calls[0].options.env.AI_SDE_AI_MODEL, "gpt-test");
   assert.equal(calls[0].options.env.AI_SDE_AI_API_KEY, "sk-test-key");
+  assert.equal(calls[0].options.env.OPENAI_API_KEY, "sk-test-key");
   assert.equal(implementation.stdout, "changed files with [REDACTED]");
   assert.equal(implementation.stderr, "[REDACTED]");
   assert.match(prompt, /Fix login crash/);
@@ -105,11 +108,49 @@ test("requires an implementation command for command provider", async () => {
   );
 });
 
+test("passes Gemini AI Studio models to implementation commands with the aider namespace", async () => {
+  const currentWorkflow = await workflow();
+  const calls = [];
+  await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --model {aiModel} --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "gemini",
+      aiModel: "gemini-2.5-flash",
+      aiApiKey: "AIza-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: currentWorkflow,
+    commandRunner: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return {
+        command,
+        args,
+        cwd: options.cwd,
+        exitCode: 0,
+        stdout: "",
+        stderr: "",
+        timedOut: false
+      };
+    }
+  });
+
+  assert.deepEqual(calls[0].args.slice(0, 4), [
+    "--yes",
+    "--model",
+    "gemini/gemini-2.5-flash",
+    "--message-file"
+  ]);
+  assert.equal(calls[0].options.env.GEMINI_API_KEY, "AIza-test-key");
+  assert.equal(calls[0].options.env.GOOGLE_API_KEY, "AIza-test-key");
+});
+
 test("blocks command implementation when command is not allowlisted", async () => {
   await assert.rejects(
     async () => runCommandImplementation({
       config: {
-        implementationCommand: "agent --prompt {promptPath}",
+        implementationCommand: "agent --model {aiModel} --prompt {promptPath}",
         implementationCommandAllowlist: ["aider"]
       },
       workflow: await workflow(),
@@ -154,6 +195,7 @@ test("wraps command implementation in docker when configured", async () => {
   assert.equal(calls[0].args[0], "run");
   assert.equal(calls[0].args.includes("-e"), true);
   assert.equal(calls[0].args.includes("AI_SDE_AI_MODEL"), true);
+  assert.equal(calls[0].args.includes("OPENAI_API_KEY"), false);
   assert.equal(calls[0].args.includes("node:22"), true);
   assert.equal(calls[0].args.includes("agent"), true);
 });

@@ -4,7 +4,7 @@ import path from "node:path";
 const DEFAULT_MODELS = {
   openai: "gpt-4o-mini",
   anthropic: "claude-3-5-sonnet-latest",
-  gemini: "gemini-1.5-pro"
+  gemini: "gemini-2.5-flash"
 };
 
 const MODEL_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
@@ -90,9 +90,10 @@ export function createAiSettingsStore(config) {
             "claude-3-5-haiku-latest"
           ],
           gemini: [
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash"
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
           ]
         },
         keyConfigured: {
