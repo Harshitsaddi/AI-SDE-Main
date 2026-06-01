@@ -106,9 +106,17 @@ export function createApp({
         } else if (stage === "implementation") {
           const implementation = await implementationService({ config: workflowConfig, workflow });
           store.markImplementationCompleted(id, implementation);
+          if (implementation.needsClarification) {
+            break;
+          }
         } else if (stage === "diff") {
           const diff = await diffService({ config: workflowConfig, workflow });
           store.markDiffCaptured(id, diff);
+          const diffWorkflow = store.get(id);
+          if (diff.captured && diff.changedFiles?.length === 0 && diffWorkflow?.implementation?.applied !== false) {
+            store.markNoChangesDetected(id, diff);
+            break;
+          }
         } else if (stage === "validation") {
           const validation = await validationService({ config: workflowConfig, workflow });
           store.markValidationCompleted(id, validation);

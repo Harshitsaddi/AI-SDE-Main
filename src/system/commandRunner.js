@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 export class CommandError extends Error {
   constructor(message, details) {
@@ -14,11 +16,66 @@ export class CommandError extends Error {
   }
 }
 
+function hasPathSeparator(command) {
+  return command.includes("/") || command.includes("\\");
+}
+
+function isExecutableFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function resolveCommandForSpawn(command, env = process.env, platform = process.platform) {
+  if (platform !== "win32" || hasPathSeparator(command) || path.extname(command)) {
+    return command;
+  }
+
+  const pathEntries = String(env.PATH || env.Path || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+  const pathExts = String(env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter(Boolean);
+
+  for (const pathEntry of pathEntries) {
+    for (const extension of pathExts) {
+      const candidate = path.join(pathEntry, `${command}${extension.toLowerCase()}`);
+      if (isExecutableFile(candidate)) {
+        return candidate;
+      }
+
+      const upperCandidate = path.join(pathEntry, `${command}${extension.toUpperCase()}`);
+      if (isExecutableFile(upperCandidate)) {
+        return upperCandidate;
+      }
+    }
+  }
+
+  return command;
+}
+
+function spawnFailureMessage(command, args, error) {
+  if (error?.code === "ENOENT") {
+    return [
+      `Command not found: ${command} ${args.join(" ")}`.trim(),
+      "Make sure the executable is installed and available on PATH for the AI SDE server process.",
+      "On Windows, restart the terminal/service after installing Node.js so npm.cmd is visible."
+    ].join(" ");
+  }
+
+  return `Command failed to start: ${command} ${args.join(" ")}`.trim();
+}
+
 export function runCommand(command, args = [], options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const env = options.env ? { ...process.env, ...options.env } : process.env;
+    const spawnCommand = resolveCommandForSpawn(command, env);
+    const child = spawn(spawnCommand, args, {
       cwd: options.cwd,
-      env: options.env ? { ...process.env, ...options.env } : process.env,
+      env,
       shell: false,
       windowsHide: true
     });
@@ -43,7 +100,15 @@ export function runCommand(command, args = [], options = {}) {
 
     child.on("error", (error) => {
       if (timeout) clearTimeout(timeout);
-      reject(error);
+      reject(new CommandError(spawnFailureMessage(command, args, error), {
+        command,
+        args,
+        cwd: options.cwd || process.cwd(),
+        exitCode: null,
+        stdout,
+        stderr: spawnFailureMessage(command, args, error),
+        timedOut
+      }));
     });
 
     child.on("close", (exitCode) => {

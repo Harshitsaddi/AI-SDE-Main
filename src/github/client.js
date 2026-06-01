@@ -4,7 +4,29 @@ export class GitHubApiError extends Error {
     this.name = "GitHubApiError";
     this.status = status;
     this.body = body;
+    this.retryAfter = null;
+    this.rateLimit = null;
   }
+}
+
+function headerValue(headers, name) {
+  return headers?.get?.(name) || headers?.[name] || null;
+}
+
+function rateLimitFromHeaders(headers) {
+  const limit = headerValue(headers, "x-ratelimit-limit");
+  const remaining = headerValue(headers, "x-ratelimit-remaining");
+  const reset = headerValue(headers, "x-ratelimit-reset");
+
+  if (!limit && !remaining && !reset) {
+    return null;
+  }
+
+  return {
+    limit: limit ? Number(limit) : null,
+    remaining: remaining ? Number(remaining) : null,
+    resetEpochSeconds: reset ? Number(reset) : null
+  };
 }
 
 export function createGitHubClient({ token, apiBaseUrl = "https://api.github.com", fetchImpl = fetch }) {
@@ -28,10 +50,14 @@ export function createGitHubClient({ token, apiBaseUrl = "https://api.github.com
     const body = text ? JSON.parse(text) : null;
 
     if (!response.ok) {
-      throw new GitHubApiError(`GitHub API request failed with status ${response.status}`, {
+      const error = new GitHubApiError(`GitHub API request failed with status ${response.status}`, {
         status: response.status,
         body
       });
+      const retryAfter = headerValue(response.headers, "retry-after");
+      error.retryAfter = retryAfter ? Number(retryAfter) : null;
+      error.rateLimit = rateLimitFromHeaders(response.headers);
+      throw error;
     }
 
     return body;

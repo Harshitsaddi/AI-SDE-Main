@@ -40,6 +40,21 @@ function truncate(value, maxLength = 4000) {
   return `${value.slice(0, maxLength)}\n[truncated]`;
 }
 
+function outputNeedsClarification(stdout, stderr) {
+  const output = `${stdout || ""}\n${stderr || ""}`.toLowerCase();
+  return [
+    "could you please clarify",
+    "please clarify",
+    "needs clarification",
+    "need clarification",
+    "issue description",
+    "is ambiguous",
+    "too ambiguous",
+    "no specific changes",
+    "no actionable"
+  ].some((phrase) => output.includes(phrase));
+}
+
 export async function runCommandImplementation({ config, workflow, commandRunner = runCommand }) {
   if (!workflow.workspace?.path) {
     throw new Error("Workflow workspace path is required for command implementation");
@@ -106,11 +121,17 @@ export async function runCommandImplementation({ config, workflow, commandRunner
     timeoutMs: config.implementationCommandTimeoutMs,
     env: implementationEnv
   });
+  const stdout = truncate(redactSecrets(result.stdout, config.secretRedactionPatterns));
+  const stderr = truncate(redactSecrets(result.stderr, config.secretRedactionPatterns));
+  const needsClarification = outputNeedsClarification(stdout, stderr);
 
   return {
     provider: "command",
-    applied: true,
-    summary: `Implementation command completed successfully: ${config.implementationCommand}`,
+    applied: !needsClarification,
+    needsClarification,
+    summary: needsClarification
+      ? "Implementation agent requested clarification and did not apply code changes."
+      : `Implementation command completed successfully: ${config.implementationCommand}`,
     command: {
       command: executionCommand,
       args: executionArgs,
@@ -128,8 +149,8 @@ export async function runCommandImplementation({ config, workflow, commandRunner
     plannedChanges: workflow.plan.implementationPlan || [],
     validationCommands: validationCommandsFromWorkflow(workflow),
     changedFiles: [],
-    stdout: truncate(redactSecrets(result.stdout, config.secretRedactionPatterns)),
-    stderr: truncate(redactSecrets(result.stderr, config.secretRedactionPatterns)),
+    stdout,
+    stderr,
     diffSummary: "Diff will be captured by the configured diff provider after the command implementation step."
   };
 }

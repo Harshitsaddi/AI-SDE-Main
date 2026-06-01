@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CommandError } from "../src/system/commandRunner.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { CommandError, resolveCommandForSpawn, runCommand } from "../src/system/commandRunner.js";
 import { loadConfig } from "../src/config.js";
 import { parseCommandLine } from "../src/validation/commandLine.js";
 import { runLocalValidation } from "../src/validation/localValidationService.js";
@@ -165,4 +168,35 @@ test("local validation blocks commands outside the allowlist", async () => {
   assert.equal(validation.results[0].status, "passed");
   assert.equal(validation.results[1].status, "blocked");
   assert.match(validation.results[1].stderr, /VALIDATION_COMMAND_ALLOWLIST/);
+});
+
+test("local validation records command startup failures", async () => {
+  const validation = await runLocalValidation({
+    config: {
+      validationCommandTimeoutMs: 1000,
+      validationCommandOverrides: {},
+      validationCommandAllowlist: [],
+      secretRedactionPatterns: []
+    },
+    workflow: workflow(["definitely-missing-ai-sde-command --version"]),
+    commandRunner: runCommand
+  });
+
+  assert.equal(validation.passed, false);
+  assert.equal(validation.results[0].status, "failed");
+  assert.equal(validation.results[0].exitCode, null);
+  assert.match(validation.results[0].stderr, /Command not found/);
+});
+
+test("windows command resolution prefers cmd shims on PATH", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-sde-path-"));
+  const npmShim = path.join(tempDir, "npm.cmd");
+  fs.writeFileSync(npmShim, "@echo off\r\n");
+
+  assert.equal(
+    resolveCommandForSpawn("npm", { PATH: tempDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, "win32"),
+    npmShim
+  );
+  assert.equal(resolveCommandForSpawn("npm.cmd", { PATH: tempDir }, "win32"), "npm.cmd");
+  assert.equal(resolveCommandForSpawn("npm", { PATH: tempDir }, "linux"), "npm");
 });

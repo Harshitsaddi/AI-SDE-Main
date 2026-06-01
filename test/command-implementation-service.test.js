@@ -25,7 +25,7 @@ async function workflow() {
       }
     },
     plan: {
-      affectedAreas: ["src/fallback.ts"],
+      affectedAreas: ["src/fallback.ts", "Unknown - No issue body provided"],
       implementationPlan: ["Update login fallback handling."],
       validationCommands: ["npm test"]
     },
@@ -97,10 +97,40 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.equal(implementation.stdout, "changed files with [REDACTED]");
   assert.equal(implementation.stderr, "[REDACTED]");
   assert.match(prompt, /Fix login crash/);
+  assert.doesNotMatch(prompt, /https:\/\/github\.com\/acme\/app\/issues\/42/);
   assert.match(prompt, /src\/auth\.ts/);
+  assert.doesNotMatch(prompt, /Unknown - No issue body provided/);
   assert.match(prompt, /AGENTS\.md/);
   assert.match(prompt, /Use focused changes and add tests/);
   assert.deepEqual(implementation.validationCommands, ["npm test", "npm run lint"]);
+});
+
+test("marks command implementation as needing clarification when the agent asks for it", async () => {
+  const implementation = await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "gemini",
+      aiModel: "gemini-2.5-flash",
+      aiApiKey: "AIza-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: await workflow(),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "The issue description is ambiguous. Could you please clarify what specific changes are requested?",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(implementation.applied, false);
+  assert.equal(implementation.needsClarification, true);
+  assert.match(implementation.summary, /requested clarification/);
 });
 
 test("requires an implementation command for command provider", async () => {

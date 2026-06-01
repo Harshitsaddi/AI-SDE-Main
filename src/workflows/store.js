@@ -372,7 +372,7 @@ export class WorkflowStore {
 
     const now = new Date().toISOString();
 
-    workflow.status = "implementation_completed";
+    workflow.status = implementation.needsClarification ? "needs_clarification" : "implementation_completed";
     workflow.updatedAt = now;
     workflow.implementation = {
       ...implementation,
@@ -380,8 +380,10 @@ export class WorkflowStore {
     };
     workflow.events.push({
       at: now,
-      type: "implementation_completed",
-      message: implementation.applied
+      type: workflow.status,
+      message: implementation.needsClarification
+        ? "Implementation agent requested clarification before changing code."
+        : implementation.applied
         ? `Implementation completed with ${implementation.changedFiles.length} changed files.`
         : "Mock implementation completed without applying code changes."
     });
@@ -432,6 +434,31 @@ export class WorkflowStore {
       message: diff.captured
         ? `Diff captured with ${diff.changedFiles.length} changed files.`
         : `Diff capture skipped: ${diff.reason}.`
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markNoChangesDetected(id, diff) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.status = "no_changes";
+    workflow.updatedAt = now;
+    workflow.diff = {
+      ...diff,
+      capturedAt: diff.capturedAt || now
+    };
+    workflow.events.push({
+      at: now,
+      type: "no_changes",
+      message: "No code changes were detected after implementation; pull request creation was skipped."
     });
 
     this.#save(workflow);

@@ -1074,6 +1074,211 @@ test("collects CI status after pull request creation when enabled", async () => 
   });
 });
 
+test("skips validation review and pull request when applied implementation has no git changes", async () => {
+  let validationCalls = 0;
+  let reviewCalls = 0;
+  let pullRequestCalls = 0;
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      branchProvider: "mock"
+    },
+    workspaceService: async ({ workflow }) => ({
+      provider: "test",
+      workspaceName: "test-workspace",
+      path: `C:\\tmp\\${workflow.id}`,
+      metadataPath: `C:\\tmp\\${workflow.id}\\metadata.json`,
+      repositoryCheckedOut: false
+    }),
+    inspectionService: async () => ({
+      provider: "test",
+      inspected: false,
+      reason: "repository_not_checked_out",
+      fileTree: [],
+      importantFiles: [],
+      techStack: [],
+      validationCommands: [],
+      searchMatches: []
+    }),
+    implementationService: async () => ({
+      provider: "test",
+      applied: true,
+      summary: "Agent completed but made no changes.",
+      candidateFiles: [],
+      plannedChanges: [],
+      validationCommands: [],
+      changedFiles: [],
+      diffSummary: "No diff."
+    }),
+    diffService: async () => ({
+      provider: "test",
+      captured: true,
+      changedFiles: [],
+      diffStat: "",
+      diff: "",
+      truncated: false
+    }),
+    validationService: async () => {
+      validationCalls += 1;
+      return {
+        provider: "test",
+        passed: true,
+        skipped: false,
+        commands: [],
+        results: [],
+        summary: "Validation passed."
+      };
+    },
+    reviewService: async () => {
+      reviewCalls += 1;
+      return {
+        provider: "test",
+        passed: true,
+        severity: "low",
+        findings: [],
+        summary: "Review passed."
+      };
+    },
+    pullRequestService: async () => {
+      pullRequestCalls += 1;
+      return {
+        provider: "test",
+        created: false
+      };
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    const webhookResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+    const webhookBody = await webhookResponse.json();
+
+    const approvalResponse = await fetch(
+      `${baseUrl}/workflows/${encodeURIComponent(webhookBody.workflowId)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          reviewer: "sam"
+        })
+      }
+    );
+    const approvalBody = await approvalResponse.json();
+
+    assert.equal(approvalResponse.status, 200);
+    assert.equal(approvalBody.status, "no_changes");
+    assert.equal(approvalBody.workflow.pullRequest, null);
+    assert.equal(approvalBody.workflow.events.at(-1).type, "no_changes");
+    assert.equal(validationCalls, 0);
+    assert.equal(reviewCalls, 0);
+    assert.equal(pullRequestCalls, 0);
+  });
+});
+
+test("stops workflow when implementation agent requests clarification", async () => {
+  let diffCalls = 0;
+  let pullRequestCalls = 0;
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      branchProvider: "mock"
+    },
+    workspaceService: async ({ workflow }) => ({
+      provider: "test",
+      workspaceName: "test-workspace",
+      path: `C:\\tmp\\${workflow.id}`,
+      metadataPath: `C:\\tmp\\${workflow.id}\\metadata.json`,
+      repositoryCheckedOut: false
+    }),
+    inspectionService: async () => ({
+      provider: "test",
+      inspected: false,
+      reason: "repository_not_checked_out",
+      fileTree: [],
+      importantFiles: [],
+      techStack: [],
+      validationCommands: [],
+      searchMatches: []
+    }),
+    implementationService: async () => ({
+      provider: "test",
+      applied: false,
+      needsClarification: true,
+      summary: "Implementation agent requested clarification and did not apply code changes.",
+      candidateFiles: [],
+      plannedChanges: [],
+      validationCommands: [],
+      changedFiles: [],
+      stdout: "Could you please clarify what specific changes are requested?",
+      stderr: ""
+    }),
+    diffService: async () => {
+      diffCalls += 1;
+      return {
+        provider: "test",
+        captured: true,
+        changedFiles: [],
+        diffStat: "",
+        diff: "",
+        truncated: false
+      };
+    },
+    pullRequestService: async () => {
+      pullRequestCalls += 1;
+      return {
+        provider: "test",
+        created: false
+      };
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    const webhookResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+    const webhookBody = await webhookResponse.json();
+
+    const approvalResponse = await fetch(
+      `${baseUrl}/workflows/${encodeURIComponent(webhookBody.workflowId)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          reviewer: "sam"
+        })
+      }
+    );
+    const approvalBody = await approvalResponse.json();
+
+    assert.equal(approvalResponse.status, 200);
+    assert.equal(approvalBody.status, "needs_clarification");
+    assert.equal(approvalBody.workflow.events.at(-1).type, "needs_clarification");
+    assert.equal(diffCalls, 0);
+    assert.equal(pullRequestCalls, 0);
+  });
+});
+
 test("publishes a mock issue comment when a plan is generated", async () => {
   const app = createApp({
     config: {

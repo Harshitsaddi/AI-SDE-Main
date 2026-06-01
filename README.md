@@ -8,9 +8,15 @@ This repository starts the first slice of an AI-assisted software engineering wo
 4. Generate a structured implementation plan.
 5. Store the workflow in an approval-ready state.
 
-The first implementation uses only Node.js built-ins so it can run before package installation or infrastructure decisions.
+The implementation uses Node.js built-ins and targets Node 24+, including the built-in SQLite module used by the default workflow store.
 
 ## Run
+
+Use Node.js 24 or newer:
+
+```bash
+node --version
+```
 
 ```bash
 npm start
@@ -162,7 +168,7 @@ npm test
 
 ## Deployment Notes
 
-The included `Dockerfile` runs the service with Node 22 Alpine. `compose.yaml` mounts `/app/var` for workflow data, audit logs, and workspaces. For Git-backed workspaces, make sure the container has network access and credentials for private repositories. For Docker-isolated validation or implementation from inside the service container, mount the host Docker socket intentionally and restrict command allowlists.
+The included `Dockerfile` runs the service with Node 24 Alpine so the default SQLite workflow store is available. `compose.yaml` mounts `/app/var` for workflow data, audit logs, and workspaces. For Git-backed workspaces, make sure the container has network access and credentials for private repositories. For Docker-isolated validation or implementation from inside the service container, mount the host Docker socket intentionally and restrict command allowlists.
 
 ## Current MVP Boundary
 
@@ -188,6 +194,8 @@ For Aider specifically, a noninteractive invocation like `aider --yes --no-gitig
 
 When the dashboard provider is Gemini and the model is `gemini-...`, `{aiModel}` is passed to Aider as `gemini/gemini-...` so Aider uses the AI Studio `GEMINI_API_KEY` path instead of Vertex AI credentials.
 
+The implementation prompt uses the issue title/body and local repository files; it does not include the GitHub issue URL, which prevents command agents from wasting time scraping a private or unavailable GitHub page. If the command agent asks for clarification instead of editing files, the workflow stops as `needs_clarification`.
+
 Set `IMPLEMENTATION_COMMAND_ALLOWLIST` to a JSON array of allowed command prefixes to restrict command implementation execution:
 
 Example:
@@ -202,7 +210,9 @@ Set `IMPLEMENTATION_CONTAINER_IMAGE` to run the command implementation provider 
 
 `DIFF_PROVIDER=git` captures changed files and a bounded diff from the workspace after implementation.
 
-`VALIDATION_PROVIDER=mock` records detected validation commands without running them. Set `VALIDATION_PROVIDER=local` to run commands in the prepared workspace with a timeout. Set `VALIDATION_PROVIDER=container` and `VALIDATION_CONTAINER_IMAGE` to run validation commands inside Docker with the workspace mounted at `VALIDATION_CONTAINER_WORKDIR`.
+If a real implementation agent reports that it applied changes but Git diff capture finds zero changed files, the workflow stops as `no_changes` and skips validation, review, PR creation, and CI collection. This prevents empty pull requests from unedited branches.
+
+`VALIDATION_PROVIDER=mock` records detected validation commands without running them. Set `VALIDATION_PROVIDER=local` to run commands in the prepared workspace with a timeout. Set `VALIDATION_PROVIDER=container` and `VALIDATION_CONTAINER_IMAGE` to run validation commands inside Docker with the workspace mounted at `VALIDATION_CONTAINER_WORKDIR`. On Windows, local validation resolves `.cmd` shims such as `npm.cmd`; if validation says `Command not found`, restart the terminal or service after installing Node.js so the server process receives the updated PATH.
 
 Set `VALIDATION_COMMAND_ALLOWLIST` to a JSON array of allowed command prefixes. When configured, local validation records disallowed commands as `blocked` instead of running them:
 

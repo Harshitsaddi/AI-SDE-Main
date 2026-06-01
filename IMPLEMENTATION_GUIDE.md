@@ -4,7 +4,10 @@ This guide takes the project from local smoke testing to real GitHub issue-drive
 
 ## 1. Verify The Project
 
+Install Node.js 24 or newer. The app uses Node's built-in SQLite module for the default workflow store.
+
 ```powershell
+node --version
 npm test
 npm start
 ```
@@ -18,6 +21,8 @@ http://localhost:3000
 The dashboard should load even before any webhooks arrive.
 
 Use the Readiness panel before a real run. It checks the dashboard token, webhook secret, GitHub API credentials, AI planner key or command, implementation provider, validation provider, execution mode, and workflow store.
+
+If local validation fails with `Command not found: npm` or `spawn npm ENOENT` on Windows, install Node.js with npm, then restart the terminal or service that runs AI SDE so `npm.cmd` is visible on PATH.
 
 ## 2. Local Safe Mode
 
@@ -186,6 +191,8 @@ If the command times out, the first thing to check is whether the agent is waiti
 
 For Gemini, keep the dashboard model as `gemini-2.5-flash` or `gemini-2.5-pro`. The implementation runner passes that to Aider as `gemini/gemini-...`, which uses a normal Google AI Studio `GEMINI_API_KEY` instead of Vertex AI project credentials.
 
+The implementation prompt does not include the GitHub issue URL. It uses the issue title/body already received from the webhook plus checked-out repository files, so Aider should not try to scrape GitHub. If Aider says the issue is ambiguous or asks for clarification, the workflow stops as `needs_clarification`.
+
 The provider writes:
 
 ```text
@@ -267,7 +274,9 @@ REPOSITORY_CONFIG={"acme/app":{"validationProvider":"local","validationCommands"
 ```
 
 5. The app creates a branch, prepares a workspace, runs implementation, captures diff, validates, reviews, and creates a PR artifact or real PR.
-6. If a stage fails, fix the cause and click Retry in the dashboard.
+6. If the implementation agent asks for clarification, the workflow stops as `needs_clarification`.
+7. If the implementation agent makes no actual git changes, the workflow stops as `no_changes` and does not create a PR.
+8. If a stage fails, fix the cause and click Retry in the dashboard.
 
 Reject with:
 

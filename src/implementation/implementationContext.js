@@ -3,7 +3,17 @@ export function candidateFilesFromWorkflow(workflow) {
   const planFiles = workflow.plan.affectedAreas || [];
 
   return [...new Set([...searchMatchFiles, ...planFiles])]
-    .filter((file) => file && file !== "To be determined after repository checkout")
+    .filter((file) => {
+      if (!file || file === "To be determined after repository checkout") {
+        return false;
+      }
+
+      if (/^unknown\b/i.test(file) || /\bno issue body provided\b/i.test(file)) {
+        return false;
+      }
+
+      return /[/.\\]/.test(file);
+    })
     .slice(0, 20);
 }
 
@@ -30,7 +40,6 @@ export function implementationPromptForWorkflow(workflow) {
     `Workflow: ${workflow.id}`,
     `Repository: ${repository.fullName || "unknown"}`,
     `Issue: #${issue.number || ""} ${issue.title || ""}`.trim(),
-    issue.url ? `Issue URL: ${issue.url}` : "",
     "",
     "## Issue Body",
     issue.body || "No issue body provided.",
@@ -52,6 +61,8 @@ export function implementationPromptForWorkflow(workflow) {
     "## Validation Commands",
     ...(validationCommands.length ? validationCommands.map((command) => `- ${command}`) : ["- None detected"]),
     "",
+    "Use only the issue details and repository files available in this workspace. Do not browse or scrape the GitHub issue URL.",
+    "If the issue is too ambiguous to safely change code, do not edit files; explain the clarification needed in your output.",
     "Make the smallest safe code change that resolves the issue. Add or update focused tests when appropriate."
   ].filter((line) => line !== "").join("\n");
 }

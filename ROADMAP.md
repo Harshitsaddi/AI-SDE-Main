@@ -43,6 +43,7 @@ Remaining production hardening work: deeper production hardening.
 - Added mock implementation provider that records planned changes without editing code.
 - Added implementation success and failure workflow states.
 - Added git diff capture after implementation.
+- Added no-change detection to skip validation, review, PR, and CI when an applied implementation leaves the branch unedited.
 - Added diff success and failure workflow states.
 - Added validation provider interface.
 - Added mock validation provider for safe default command collection.
@@ -67,8 +68,10 @@ Remaining production hardening work: deeper production hardening.
 - Added GitHub issue comment publishing for plans and workflow status updates.
 - Added `/ai approve` and `/ai reject` issue comment command support.
 - Added GitHub App installation token authentication for GitHub API providers.
+- Added GitHub API retry-after and rate-limit metadata on API errors.
 - Added append-only JSONL audit logging for workflow lifecycle events.
 - Added command-based implementation provider for local coding agents.
+- Added clarification detection for command agents that decline to edit ambiguous issues.
 - Added dashboard API bearer-token protection with `DASHBOARD_TOKEN`.
 - Added dashboard/provider readiness checks for common configuration mistakes.
 - Added in-process workflow execution locking for duplicate approval/retry protection.
@@ -89,6 +92,7 @@ Remaining production hardening work: deeper production hardening.
 - Added tests for repository inspection, repository instruction ingestion, validation command detection, skipped inspection, and dashboard serving.
 - Added tests for mock implementation output and implementation failure handling.
 - Added tests for clean diff capture, changed-file parsing, diff truncation, and diff failure routing.
+- Added tests for no-change workflow termination before PR creation.
 - Added tests for validation command parsing, mock validation, local validation pass/fail collection, and no-command handling.
 - Added tests for mock review findings, model review normalization, and review failure routing.
 - Added tests for pull request body generation, mock PR output, GitHub PR API calls, PR failure routing, and CI status collection.
@@ -97,8 +101,10 @@ Remaining production hardening work: deeper production hardening.
 - Added tests for validation command overrides.
 - Added tests for issue comment publishing and comment-command approval/rejection.
 - Added tests for GitHub App JWT signing and installation token exchange.
+- Added tests for GitHub API rate-limit error metadata.
 - Added tests for file-backed audit log entries.
 - Added tests for command implementation prompt creation and command execution.
+- Added tests for ambiguous command-agent output stopping as `needs_clarification`.
 - Added tests for command allowlist policy enforcement.
 - Added tests for default and custom secret redaction.
 - Added tests for repository-specific config merging.
@@ -109,4 +115,4 @@ Remaining production hardening work: deeper production hardening.
 
 ## Next In Order
 
-1. Add deeper production hardening for multi-process queues, retries with backoff, rate-limit handling, and observability.
+1. Add deeper production hardening for multi-process durable queues, retries with backoff, and observability.

@@ -548,7 +548,7 @@ export function dashboardHtml() {
 
       function statusClass(status) {
         if (status.includes("failed") || status.includes("rejected")) return "failed";
-        if (["ci_passed", "pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
+        if (["needs_clarification", "no_changes", "ci_passed", "pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
         return "";
       }
 
