@@ -91,6 +91,10 @@ test("creates a GitHub pull request through the API", async () => {
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
+    if (url.includes("/pulls?")) {
+      return response(200, []);
+    }
+
     return response(201, {
       number: 12,
       html_url: "https://github.com/acme/app/pull/12",
@@ -113,15 +117,49 @@ test("creates a GitHub pull request through the API", async () => {
   assert.equal(pullRequest.provider, "github_token");
   assert.equal(pullRequest.created, true);
   assert.equal(pullRequest.number, 12);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://api.github.test/repos/acme/app/pulls");
-  assert.deepEqual(JSON.parse(calls[0].options.body), {
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://api.github.test/repos/acme/app/pulls?state=open&head=acme%3Aai%2Fissue-42&base=main");
+  assert.equal(calls[1].url, "https://api.github.test/repos/acme/app/pulls");
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
     title: "Fix #42: Fix login crash",
     head: "ai/issue-42",
     base: "main",
     body: buildPullRequestBody(workflow()),
     draft: true
   });
+});
+
+test("reuses an existing open GitHub pull request for the workflow branch", async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return response(200, [
+      {
+        number: 12,
+        html_url: "https://github.com/acme/app/pull/12",
+        title: "Fix #42: Fix login crash",
+        body: "existing body",
+        draft: true
+      }
+    ]);
+  };
+
+  const pullRequest = await createGitHubPullRequest({
+    config: {
+      githubToken: "token",
+      githubApiBaseUrl: "https://api.github.test",
+      prDraft: true
+    },
+    workflow: workflow(),
+    fetchImpl
+  });
+
+  assert.equal(pullRequest.provider, "github_token");
+  assert.equal(pullRequest.created, false);
+  assert.equal(pullRequest.existing, true);
+  assert.equal(pullRequest.number, 12);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.github.test/repos/acme/app/pulls?state=open&head=acme%3Aai%2Fissue-42&base=main");
 });
 
 test("pushes a checked out workspace branch before creating a GitHub pull request", async () => {
@@ -136,6 +174,10 @@ test("pushes a checked out workspace branch before creating a GitHub pull reques
   };
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });
+    if (url.includes("/pulls?")) {
+      return response(200, []);
+    }
+
     return response(201, {
       number: 12,
       html_url: "https://github.com/acme/app/pull/12",
@@ -174,5 +216,5 @@ test("pushes a checked out workspace branch before creating a GitHub pull reques
     }
   });
   assert.equal(pullRequest.push.exitCode, 0);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
 });

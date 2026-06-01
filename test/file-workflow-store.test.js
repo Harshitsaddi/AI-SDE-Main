@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import os from "node:os";
 import path from "node:path";
 import { createWorkflowStore } from "../src/workflows/fileStore.js";
@@ -58,6 +59,65 @@ test("creates memory workflow store when configured", () => {
   assert.equal(store.list().length, 1);
 });
 
+test("persists workflows to sqlite and reloads them", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-sde-sqlite-store-"));
+  const workflowStorePath = path.join(root, "workflows.sqlite");
+  const config = {
+    workflowStoreProvider: "sqlite",
+    workflowStorePath
+  };
+
+  const store = createWorkflowStore(config);
+  const workflow = store.createFromPlan({
+    planningInput: planningInput(),
+    plan: {
+      provider: "mock"
+    }
+  });
+  store.approve(workflow.id, {
+    reviewer: "sam"
+  });
+
+  const database = new DatabaseSync(workflowStorePath, { readOnly: true });
+  const row = database.prepare(`
+    SELECT id, status, repository, issue_number
+    FROM workflows
+    WHERE id = ?
+  `).get(workflow.id);
+  database.close();
+
+  const reloaded = createWorkflowStore(config);
+  const loadedWorkflow = reloaded.get(workflow.id);
+
+  assert.equal(row.status, "approved");
+  assert.equal(row.repository, "acme/app");
+  assert.equal(row.issue_number, 42);
+  assert.equal(loadedWorkflow.status, "approved");
+  assert.equal(loadedWorkflow.approvals[0].reviewer, "sam");
+});
+
+test("creates sqlite workflow indexes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ai-sde-sqlite-indexes-"));
+  const workflowStorePath = path.join(root, "workflows.sqlite");
+  createWorkflowStore({
+    workflowStoreProvider: "sqlite",
+    workflowStorePath
+  });
+
+  const database = new DatabaseSync(workflowStorePath, { readOnly: true });
+  const indexes = database.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'index'
+    ORDER BY name
+  `).all().map((row) => row.name);
+  database.close();
+
+  assert.ok(indexes.includes("idx_workflows_repository_issue"));
+  assert.ok(indexes.includes("idx_workflows_status"));
+  assert.ok(indexes.includes("idx_workflows_updated_at"));
+});
+
 test("writes append-only audit log entries when configured", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "ai-sde-audit-"));
   const auditLogPath = path.join(root, "audit.jsonl");
@@ -92,7 +152,7 @@ test("writes append-only audit log entries when configured", async () => {
 test("rejects unsupported workflow store providers", () => {
   assert.throws(
     () => createWorkflowStore({
-      workflowStoreProvider: "sqlite"
+      workflowStoreProvider: "postgres"
     }),
     /Unsupported WORKFLOW_STORE_PROVIDER/
   );

@@ -8,9 +8,12 @@ import { inspectLocalRepository } from "../src/inspection/repositoryInspector.js
 async function createSampleRepo() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ai-sde-inspect-"));
   await mkdir(path.join(root, "src"), { recursive: true });
+  await mkdir(path.join(root, ".github"), { recursive: true });
   await mkdir(path.join(root, "node_modules", "ignored"), { recursive: true });
 
   await writeFile(path.join(root, "README.md"), "# Sample App\n\nHandles login flows.\n", "utf8");
+  await writeFile(path.join(root, "AGENTS.md"), "Use focused changes and add tests.\n", "utf8");
+  await writeFile(path.join(root, ".github", "copilot-instructions.md"), "Prefer node:test.\n", "utf8");
   await writeFile(path.join(root, "package.json"), JSON.stringify({
     scripts: {
       test: "node --test",
@@ -59,6 +62,10 @@ test("inspects local repository files and validation commands", async () => {
   assert.ok(inspection.fileTree.includes("src/auth.ts"));
   assert.equal(inspection.fileTree.includes("node_modules/ignored/index.js"), false);
   assert.ok(inspection.importantFiles.some((file) => file.path === "README.md"));
+  assert.deepEqual(inspection.repositoryInstructions.map((file) => file.path), [
+    ".github/copilot-instructions.md",
+    "AGENTS.md"
+  ]);
   assert.ok(inspection.searchMatches.some((match) => match.path === "src/auth.ts"));
 });
 
@@ -74,4 +81,5 @@ test("skips inspection when repository is not checked out", async () => {
   assert.equal(inspection.inspected, false);
   assert.equal(inspection.reason, "repository_not_checked_out");
   assert.deepEqual(inspection.fileTree, []);
+  assert.deepEqual(inspection.repositoryInstructions, []);
 });

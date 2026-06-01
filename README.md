@@ -35,6 +35,7 @@ Copy `.env.example` into your shell environment and set:
 
 ```text
 PORT=3000
+DASHBOARD_TOKEN=
 GITHUB_WEBHOOK_SECRET=...
 AI_PROVIDER=mock
 AI_MODEL=
@@ -77,18 +78,22 @@ DIFF_MAX_BYTES=200000
 REVIEW_PROVIDER=mock
 PR_PROVIDER=mock
 PR_DRAFT=true
+CI_PROVIDER=none
 ISSUE_COMMENT_PROVIDER=none
 AUDIT_LOG_PROVIDER=none
 AUDIT_LOG_PATH=var/audit/workflow-audit.jsonl
+WORKFLOW_EXECUTION_MODE=sync
 SECRET_REDACTION_PATTERNS=
 REPOSITORY_CONFIG=
-WORKFLOW_STORE_PROVIDER=file
-WORKFLOW_STORE_PATH=var/data/workflows.json
+WORKFLOW_STORE_PROVIDER=sqlite
+WORKFLOW_STORE_PATH=var/data/workflows.sqlite
 ```
+
+`DASHBOARD_TOKEN` protects the dashboard APIs when set. Use a long random value before exposing the app through a tunnel; the browser dashboard will ask for it and store it in local storage.
 
 `AI_PROVIDER=mock` returns a deterministic plan and is useful while wiring GitHub and approval UX.
 
-The dashboard includes AI settings for selecting `mock`, `command`, `openai`, `anthropic`, or `gemini`, setting a model, and saving an API key locally. Saved keys are stored at `AI_SETTINGS_PATH` and are not returned to the browser. New workflows use the latest saved dashboard settings. You can also set `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, or provider-specific keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) from the environment.
+The dashboard includes readiness checks plus AI settings for selecting `mock`, `command`, `openai`, `anthropic`, or `gemini`, setting a model, and saving an API key locally. Saved keys are stored at `AI_SETTINGS_PATH` and are not returned to the browser. New workflows use the latest saved dashboard settings. You can also set `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY`, or provider-specific keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) from the environment.
 
 Set `AI_PROVIDER=command` to call an external planning tool. `AI_COMMAND` is parsed without a shell and may use `{inputPath}`, `{promptPath}`, `{outputPath}`, `{repository}`, and `{issueNumber}` placeholders. The provider writes planning input and prompt files under `AI_COMMAND_WORK_DIR`; the command can either print a plan JSON document to stdout or write it to `{outputPath}`. Use `AI_COMMAND_ALLOWLIST` to restrict allowed command prefixes.
 
@@ -112,6 +117,10 @@ Shows a local workflow dashboard with refresh, approval, rejection, and retry ac
 
 Returns service status.
 
+### `GET /health/providers`
+
+Returns dashboard readiness checks for GitHub auth, AI planner config, implementation provider, validation provider, execution mode, and workflow persistence. This endpoint requires `Authorization: Bearer <DASHBOARD_TOKEN>` when `DASHBOARD_TOKEN` is configured.
+
 ### `GET /settings/ai`
 
 Returns the active AI planner provider, selected model, supported dashboard options, and whether an API key is configured for each hosted model provider.
@@ -120,9 +129,11 @@ Returns the active AI planner provider, selected model, supported dashboard opti
 
 Updates dashboard AI settings. The request can include `provider`, `model`, `apiKey`, and `clearApiKey`. API keys are saved server-side and are never included in the response.
 
+Dashboard API endpoints require `Authorization: Bearer <DASHBOARD_TOKEN>` when `DASHBOARD_TOKEN` is configured. `/health` and `/webhooks/github` do not use this token; webhooks are protected by `GITHUB_WEBHOOK_SECRET`.
+
 ### `POST /webhooks/github`
 
-Accepts GitHub `issues` and `issue_comment` events. For MVP, `opened`, `reopened`, and `edited` issue actions create or refresh an implementation plan. `issue_comment` `created` events can approve or reject a workflow when the comment body is `/ai approve` or `/ai reject`.
+Accepts GitHub `issues` and `issue_comment` events. For MVP, only `opened` issue actions create an implementation plan; issue edits are ignored to avoid duplicate workflows. `issue_comment` `created` events can approve or reject a workflow when the comment body is `/ai approve` or `/ai reject`.
 
 Required headers:
 
@@ -167,11 +178,13 @@ The `git` provider expects the repository `clone_url` from the GitHub webhook to
 
 Repository inspection runs after workspace preparation. The local inspector scans checked-out workspaces, skips common dependency/build folders, reads important files, detects stack hints, suggests validation commands, and searches for issue-related terms.
 
+Repository inspection also captures agent instruction files when present: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md`. These instructions are included in the implementation prompt for command agents.
+
 `IMPLEMENTATION_PROVIDER=mock` records the implementation plan, candidate files, and validation commands without changing code. It is the adapter seam for a real coding agent provider.
 
 Set `IMPLEMENTATION_PROVIDER=command` to run a local implementation agent in the prepared workspace. `IMPLEMENTATION_COMMAND` is parsed without a shell and may use `{promptPath}`, `{workspacePath}`, and `{workflowId}` placeholders. The provider writes `.ai-sde/implementation-prompt.md` before invoking the command and also exposes `AI_SDE_IMPLEMENTATION_PROMPT`, `AI_SDE_WORKSPACE`, `AI_SDE_WORKFLOW_ID`, `AI_SDE_AI_PROVIDER`, `AI_SDE_AI_MODEL`, and `AI_SDE_AI_API_KEY` environment variables.
 
-For Aider specifically, a noninteractive invocation like `aider --yes --model {aiModel} --message-file {promptPath}` is usually the safest starting point.
+For Aider specifically, a noninteractive invocation like `aider --yes --no-gitignore --model {aiModel} --message-file {promptPath}` is usually the safest starting point.
 
 When the dashboard provider is Gemini and the model is `gemini-...`, `{aiModel}` is passed to Aider as `gemini/gemini-...` so Aider uses the AI Studio `GEMINI_API_KEY` path instead of Vertex AI credentials.
 
@@ -181,7 +194,7 @@ Example:
 
 ```text
 IMPLEMENTATION_PROVIDER=command
-IMPLEMENTATION_COMMAND=aider --message-file {promptPath}
+IMPLEMENTATION_COMMAND=aider --yes --no-gitignore --model {aiModel} --message-file {promptPath}
 IMPLEMENTATION_COMMAND_ALLOWLIST=["aider"]
 ```
 
@@ -203,9 +216,11 @@ Set `VALIDATION_COMMAND_OVERRIDES` to a JSON object when a repository needs exac
 VALIDATION_COMMAND_OVERRIDES={"acme/app":["npm run ci","npm run lint"],"*":["npm test"]}
 ```
 
-`REVIEW_PROVIDER=mock` reviews captured diff and validation metadata, producing findings for failed validation, truncated diffs, or no-change implementations.
+`REVIEW_PROVIDER=mock` reviews captured diff and validation metadata, producing findings for failed validation, truncated diffs, or no-change implementations. Set `REVIEW_PROVIDER=model` to use the dashboard-selected hosted AI provider (`openai`, `anthropic`, or `gemini`) for JSON code-review findings over the implementation summary, diff, and validation output.
 
-`PR_PROVIDER=mock` prepares a pull request artifact without calling GitHub. Set `PR_PROVIDER=github_token` and provide `GITHUB_TOKEN` to create a real draft pull request.
+`PR_PROVIDER=mock` prepares a pull request artifact without calling GitHub. Set `PR_PROVIDER=github_token` and provide `GITHUB_TOKEN` to create a real draft pull request. The GitHub provider checks for an existing open pull request from the workflow branch before creating a new one, so retrying a PR stage reuses the existing PR when possible.
+
+Set `CI_PROVIDER=github` to collect GitHub check runs for the workflow branch after pull request creation. Passing checks move the workflow to `ci_passed`; pending or failing checks are stored as `ci_pending`; API collection failures are retryable as `ci_status_failed`.
 
 Set `ISSUE_COMMENT_PROVIDER=mock` to record plan/status comments on workflows without calling GitHub, or `ISSUE_COMMENT_PROVIDER=github_token` with `GITHUB_TOKEN` to publish issue comments. When enabled, plan comments tell maintainers to reply with `/ai approve` or `/ai reject`; `issue_comment` webhooks with those commands approve or reject the workflow.
 
@@ -219,7 +234,9 @@ Set `REPOSITORY_CONFIG` to a JSON object for repo-specific overrides. Keys are `
 REPOSITORY_CONFIG={"acme/app":{"validationProvider":"local","validationCommands":["npm test"],"validationCommandAllowlist":["npm test"]}}
 ```
 
-`WORKFLOW_STORE_PROVIDER=file` persists workflows to `WORKFLOW_STORE_PATH` so local workflow state survives service restarts. Set it to `memory` for ephemeral test/dev runs.
+`WORKFLOW_STORE_PROVIDER=sqlite` persists workflows to `WORKFLOW_STORE_PATH` with indexed columns for status, repository, issue number, and updated time. Use this for real local runs. Set it to `file` for the older JSON-file store, or `memory` for ephemeral test/dev runs.
+
+`WORKFLOW_EXECUTION_MODE=sync` keeps approval/retry requests open until the full workflow finishes, which is convenient in tests and local smoke runs. Set `WORKFLOW_EXECUTION_MODE=async` for real usage so approval/retry requests return with `queued` while implementation, validation, review, and PR creation continue in the background.
 
 ## Human Approval
 

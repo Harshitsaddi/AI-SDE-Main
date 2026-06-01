@@ -22,6 +22,7 @@ export function implementationPromptForWorkflow(workflow) {
   const repository = workflow.planningInput?.repository || {};
   const candidateFiles = candidateFilesFromWorkflow(workflow);
   const validationCommands = validationCommandsFromWorkflow(workflow);
+  const repositoryInstructions = workflow.repositoryInspection?.repositoryInstructions || [];
 
   return [
     "# AI SDE Implementation Task",
@@ -39,6 +40,14 @@ export function implementationPromptForWorkflow(workflow) {
     "",
     "## Candidate Files",
     ...(candidateFiles.length ? candidateFiles.map((file) => `- ${file}`) : ["- None detected"]),
+    "",
+    "## Repository Instructions",
+    ...(repositoryInstructions.length
+      ? repositoryInstructions.flatMap((file) => [
+        `### ${file.path}`,
+        file.content
+      ])
+      : ["None detected."]),
     "",
     "## Validation Commands",
     ...(validationCommands.length ? validationCommands.map((command) => `- ${command}`) : ["- None detected"]),

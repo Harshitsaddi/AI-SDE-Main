@@ -37,6 +37,13 @@ const IMPORTANT_FILES = new Set([
   "yarn.lock"
 ]);
 
+const INSTRUCTION_FILES = new Set([
+  ".github/copilot-instructions.md",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md"
+]);
+
 const TEXT_EXTENSIONS = new Set([
   ".c",
   ".cc",
@@ -126,6 +133,26 @@ async function readImportantFiles(rootPath, fileTree) {
   }
 
   return important;
+}
+
+async function readRepositoryInstructions(rootPath, fileTree) {
+  const instructions = [];
+
+  for (const repoPath of fileTree) {
+    if (!INSTRUCTION_FILES.has(repoPath)) {
+      continue;
+    }
+
+    const absolutePath = path.join(rootPath, repoPath);
+    const content = await readFile(absolutePath, "utf8");
+    instructions.push({
+      path: repoPath,
+      content: content.slice(0, 4000),
+      truncated: content.length > 4000
+    });
+  }
+
+  return instructions;
 }
 
 function parsePackageJson(importantFiles) {
@@ -267,6 +294,7 @@ export async function inspectLocalRepository({ config, workflow }) {
       reason: "repository_not_checked_out",
       fileTree: [],
       importantFiles: [],
+      repositoryInstructions: [],
       techStack: [],
       validationCommands: [],
       searchMatches: []
@@ -276,6 +304,7 @@ export async function inspectLocalRepository({ config, workflow }) {
   const rootPath = workflow.workspace.path;
   const fileTree = await walkFiles(rootPath, config.inspectionMaxFiles);
   const importantFiles = await readImportantFiles(rootPath, fileTree);
+  const repositoryInstructions = await readRepositoryInstructions(rootPath, fileTree);
   const packageJson = parsePackageJson(importantFiles);
   const terms = searchTerms(workflow.planningInput.issue);
 
@@ -285,6 +314,7 @@ export async function inspectLocalRepository({ config, workflow }) {
     rootPath,
     fileTree,
     importantFiles,
+    repositoryInstructions,
     techStack: detectTechStack(fileTree),
     validationCommands: validationCommandsFor({ fileTree, packageJson }),
     searchTerms: terms,

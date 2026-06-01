@@ -14,7 +14,7 @@ export class WorkflowStore {
 
   #save(workflow = null) {
     if (this.#onChange) {
-      this.#onChange(this.list());
+      this.#onChange(this.list(), workflow);
     }
 
     if (workflow && this.#onAudit) {
@@ -51,6 +51,7 @@ export class WorkflowStore {
       validation: null,
       review: null,
       pullRequest: null,
+      ciStatus: null,
       issueComments: [],
       approvals: [],
       retries: [],
@@ -123,7 +124,8 @@ export class WorkflowStore {
       diff_capture_failed: "diff",
       validation_failed: "validation",
       review_failed: "review",
-      pr_creation_failed: "pullRequest"
+      pr_creation_failed: "pullRequest",
+      ci_status_failed: "ciStatus"
     };
     const stage = retryStageByStatus[workflow.status];
 
@@ -150,6 +152,28 @@ export class WorkflowStore {
 
     this.#save(workflow);
     return { ok: true, workflow, stage };
+  }
+
+  markWorkflowQueued(id, { stage = "branch", source = "workflow" } = {}) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.status = "queued";
+    workflow.updatedAt = now;
+    workflow.queuedStage = stage;
+    workflow.events.push({
+      at: now,
+      type: "workflow_queued",
+      message: `Workflow queued from ${stage} by ${source}.`
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
   }
 
   markIssueCommentPublished(id, comment) {
@@ -548,6 +572,52 @@ export class WorkflowStore {
       message: pullRequest.created
         ? `Pull request #${pullRequest.number} created.`
         : "Mock pull request prepared."
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markCiStatusCollected(id, ciStatus) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.status = ciStatus.passed ? "ci_passed" : "ci_pending";
+    workflow.updatedAt = now;
+    workflow.ciStatus = {
+      ...ciStatus,
+      collectedAt: now
+    };
+    workflow.events.push({
+      at: now,
+      type: workflow.status,
+      message: ciStatus.summary
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markCiStatusFailed(id, error) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+
+    workflow.status = "ci_status_failed";
+    workflow.updatedAt = now;
+    workflow.events.push({
+      at: now,
+      type: "ci_status_failed",
+      message: error.message
     });
 
     this.#save(workflow);

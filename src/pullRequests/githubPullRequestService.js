@@ -33,6 +33,31 @@ export async function createGitHubPullRequest({
   const { owner, repo } = splitRepositoryFullName(repository.fullName);
   const client = await createGitHubClientFromConfig({ config, fetchImpl });
   const push = await pushWorkspaceBranch({ workflow, commandRunner });
+  const head = `${owner}:${workflow.branch.branchName}`;
+  const existingPullRequests = await client.listPullRequests({
+    owner,
+    repo,
+    head,
+    base: repository.defaultBranch,
+    state: "open"
+  });
+  const existingPullRequest = existingPullRequests?.[0];
+
+  if (existingPullRequest) {
+    return {
+      provider: "github_token",
+      created: false,
+      existing: true,
+      draft: Boolean(existingPullRequest.draft),
+      title: existingPullRequest.title,
+      body: existingPullRequest.body,
+      head: workflow.branch.branchName,
+      base: repository.defaultBranch,
+      url: existingPullRequest.html_url,
+      number: existingPullRequest.number,
+      push
+    };
+  }
 
   const pullRequest = await client.createPullRequest({
     owner,

@@ -1,4 +1,4 @@
-const PLAN_TRIGGER_ACTIONS = new Set(["opened", "reopened", "edited"]);
+const PLAN_TRIGGER_ACTIONS = new Set(["opened"]);
 
 export function shouldPlanIssue(eventName, payload) {
   return eventName === "issues" && PLAN_TRIGGER_ACTIONS.has(payload.action);

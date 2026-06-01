@@ -76,6 +76,19 @@ test("records retry requests for failed workflows", () => {
   assert.equal(result.workflow.events.at(-1).type, "retry_requested");
 });
 
+test("records retry requests for failed CI status collection", () => {
+  const store = new WorkflowStore();
+  const workflow = createWorkflow(store);
+  store.markCiStatusFailed(workflow.id, new Error("GitHub checks API failed"));
+
+  const result = store.requestRetry(workflow.id, {
+    reviewer: "sam"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.stage, "ciStatus");
+});
+
 test("does not retry non-failed workflows", () => {
   const store = new WorkflowStore();
   const workflow = createWorkflow(store);

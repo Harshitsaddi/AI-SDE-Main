@@ -125,6 +125,35 @@ test("ignores issue actions that should not trigger planning", async () => {
   });
 });
 
+test("ignores edited issues to avoid duplicate workflows", async () => {
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock"
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload({ action: "edited" })));
+    const response = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.status, "ignored");
+    assert.equal(body.reason, "event_does_not_create_plan");
+    assert.equal(app.store.list().length, 0);
+  });
+});
+
 test("approves a generated workflow through the HTTP API", async () => {
   const app = createApp({
     config: {
@@ -926,6 +955,122 @@ test("retries a failed workflow from the failed stage", async () => {
     assert.equal(retryBody.workflow.events.some((event) => event.type === "retry_requested"), true);
     assert.equal(validationCalls, 2);
     assert.equal(branchCalls, 1);
+  });
+});
+
+test("collects CI status after pull request creation when enabled", async () => {
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      branchProvider: "mock",
+      ciProvider: "github"
+    },
+    workspaceService: async ({ workflow }) => ({
+      provider: "test",
+      workspaceName: "test-workspace",
+      path: `C:\\tmp\\${workflow.id}`,
+      metadataPath: `C:\\tmp\\${workflow.id}\\metadata.json`,
+      repositoryCheckedOut: false
+    }),
+    inspectionService: async () => ({
+      provider: "test",
+      inspected: false,
+      reason: "repository_not_checked_out",
+      fileTree: [],
+      importantFiles: [],
+      techStack: [],
+      validationCommands: [],
+      searchMatches: []
+    }),
+    implementationService: async () => ({
+      provider: "test",
+      applied: false,
+      summary: "Implementation dry run.",
+      candidateFiles: [],
+      plannedChanges: [],
+      validationCommands: [],
+      changedFiles: [],
+      diffSummary: "No diff."
+    }),
+    diffService: async () => ({
+      provider: "test",
+      captured: true,
+      changedFiles: [],
+      diffStat: "",
+      diff: "",
+      truncated: false
+    }),
+    validationService: async () => ({
+      provider: "test",
+      passed: true,
+      skipped: false,
+      commands: ["npm test"],
+      results: [],
+      summary: "Validation passed."
+    }),
+    reviewService: async () => ({
+      provider: "test",
+      passed: true,
+      severity: "info",
+      findings: [],
+      summary: "Review passed."
+    }),
+    pullRequestService: async () => ({
+      provider: "test",
+      created: false,
+      draft: true,
+      title: "Fix #42: Fix login crash",
+      body: "PR body",
+      head: "ai/issue-42",
+      base: "main",
+      url: "https://github.com/acme/app/pull/new/ai%2Fissue-42",
+      number: null
+    }),
+    ciStatusService: async () => ({
+      provider: "github",
+      passed: true,
+      status: "passed",
+      total: 1,
+      passedCount: 1,
+      failedCount: 0,
+      pendingCount: 0,
+      checkRuns: [{ name: "test", status: "completed", conclusion: "success", url: "" }],
+      summary: "1 GitHub check run(s): 0 failed, 0 pending."
+    })
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    const webhookResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+    const webhookBody = await webhookResponse.json();
+
+    const approvalResponse = await fetch(
+      `${baseUrl}/workflows/${encodeURIComponent(webhookBody.workflowId)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          reviewer: "sam"
+        })
+      }
+    );
+    const approvalBody = await approvalResponse.json();
+
+    assert.equal(approvalResponse.status, 200);
+    assert.equal(approvalBody.status, "ci_passed");
+    assert.equal(approvalBody.workflow.ciStatus.passed, true);
+    assert.equal(approvalBody.workflow.events.at(-1).type, "ci_passed");
   });
 });
 

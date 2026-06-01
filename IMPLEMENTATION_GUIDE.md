@@ -17,6 +17,8 @@ http://localhost:3000
 
 The dashboard should load even before any webhooks arrive.
 
+Use the Readiness panel before a real run. It checks the dashboard token, webhook secret, GitHub API credentials, AI planner key or command, implementation provider, validation provider, execution mode, and workflow store.
+
 ## 2. Local Safe Mode
 
 Create `.env`:
@@ -29,6 +31,7 @@ Use this first:
 
 ```text
 PORT=3000
+DASHBOARD_TOKEN=replace-with-a-long-random-dashboard-token
 GITHUB_WEBHOOK_SECRET=replace-with-a-long-random-secret
 AI_PROVIDER=mock
 BRANCH_PROVIDER=mock
@@ -37,14 +40,26 @@ IMPLEMENTATION_PROVIDER=mock
 VALIDATION_PROVIDER=mock
 REVIEW_PROVIDER=mock
 PR_PROVIDER=mock
+CI_PROVIDER=none
 ISSUE_COMMENT_PROVIDER=mock
-WORKFLOW_STORE_PROVIDER=file
-WORKFLOW_STORE_PATH=var/data/workflows.json
+WORKFLOW_STORE_PROVIDER=sqlite
+WORKFLOW_STORE_PATH=var/data/workflows.sqlite
+WORKFLOW_EXECUTION_MODE=sync
 AUDIT_LOG_PROVIDER=file
 AUDIT_LOG_PATH=var/audit/workflow-audit.jsonl
 ```
 
 This proves planning, approval, retry, dashboard detail views, comments, persistence, and audit logging without changing a real repository.
+
+When `DASHBOARD_TOKEN` is set, the dashboard will ask for that token before loading workflows or AI settings. Keep it set when using ngrok or any public tunnel.
+
+For real runs with Aider or another implementation agent, switch to:
+
+```text
+WORKFLOW_EXECUTION_MODE=async
+```
+
+That makes approvals and retries return immediately as `queued` while the workflow continues in the background.
 
 ## 3. Expose Localhost To GitHub
 
@@ -162,12 +177,12 @@ Example with Aider:
 
 ```text
 IMPLEMENTATION_PROVIDER=command
-IMPLEMENTATION_COMMAND=aider --yes --model {aiModel} --message-file {promptPath}
+IMPLEMENTATION_COMMAND=aider --yes --no-gitignore --model {aiModel} --message-file {promptPath}
 IMPLEMENTATION_COMMAND_ALLOWLIST=["aider"]
 IMPLEMENTATION_COMMAND_TIMEOUT_MS=600000
 ```
 
-If the command times out, the first thing to check is whether the agent is waiting for confirmation or trying to use a model without the dashboard-selected API key. `--yes` keeps Aider noninteractive, and `{aiModel}` lets the dashboard-selected model flow through directly.
+If the command times out, the first thing to check is whether the agent is waiting for confirmation or trying to use a model without the dashboard-selected API key. `--yes` keeps Aider noninteractive, `--no-gitignore` avoids Aider editing `.gitignore`, and `{aiModel}` lets the dashboard-selected model flow through directly.
 
 For Gemini, keep the dashboard model as `gemini-2.5-flash` or `gemini-2.5-pro`. The implementation runner passes that to Aider as `gemini/gemini-...`, which uses a normal Google AI Studio `GEMINI_API_KEY` instead of Vertex AI project credentials.
 
@@ -189,6 +204,16 @@ AI_SDE_AI_API_KEY
 ```
 
 Use those variables in a custom implementation wrapper when you want one command to route to OpenAI, Anthropic, or Gemini based on the dashboard selection.
+
+If the target repository includes `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.github/copilot-instructions.md`, the app includes those instructions in the implementation prompt automatically.
+
+For real AI review, set:
+
+```text
+REVIEW_PROVIDER=model
+```
+
+This uses the same dashboard-selected hosted provider and API key as planning.
 
 ## 9. Real Validation
 
@@ -232,7 +257,7 @@ REPOSITORY_CONFIG={"acme/app":{"validationProvider":"local","validationCommands"
 
 ## 12. Normal Workflow
 
-1. Create or edit a GitHub issue.
+1. Create a GitHub issue.
 2. The app receives the webhook and creates a plan.
 3. The app comments on the issue if `ISSUE_COMMENT_PROVIDER` is enabled.
 4. Approve in the dashboard or comment:
@@ -264,7 +289,7 @@ The compose file persists app data under the `ai-sde-data` volume.
 Workflow data:
 
 ```text
-var/data/workflows.json
+var/data/workflows.sqlite
 ```
 
 Audit log:
@@ -297,11 +322,15 @@ VALIDATION_PROVIDER=mock
 BRANCH_PROVIDER=github_token
 PR_PROVIDER=mock
 ISSUE_COMMENT_PROVIDER=github_token
+WORKFLOW_EXECUTION_MODE=async
+CI_PROVIDER=github
 ```
 
 Then move one step at a time:
 
 1. Turn on real PRs with `PR_PROVIDER=github_token`.
-2. Turn on local validation with `VALIDATION_PROVIDER=local`.
-3. Turn on command implementation with `IMPLEMENTATION_PROVIDER=command`.
-4. Add Docker validation once local validation is stable.
+2. Turn on CI collection with `CI_PROVIDER=github`.
+3. Turn on model review with `REVIEW_PROVIDER=model`.
+4. Turn on local validation with `VALIDATION_PROVIDER=local`.
+5. Turn on command implementation with `IMPLEMENTATION_PROVIDER=command`.
+6. Add Docker validation once local validation is stable.

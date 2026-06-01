@@ -53,6 +53,17 @@ export function createGitHubClient({ token, apiBaseUrl = "https://api.github.com
         body: JSON.stringify({ title, head, base, body, draft })
       });
     },
+    listPullRequests({ owner, repo, head, base, state = "open" }) {
+      const params = new URLSearchParams({
+        state,
+        head,
+        base
+      });
+      return request(`/repos/${owner}/${repo}/pulls?${params.toString()}`);
+    },
+    listCheckRunsForRef({ owner, repo, ref }) {
+      return request(`/repos/${owner}/${repo}/commits/${encodeURIComponent(ref)}/check-runs`);
+    },
     createIssueComment({ owner, repo, issueNumber, body }) {
       return request(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
         method: "POST",

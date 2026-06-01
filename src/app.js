@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import { generatePlan } from "./ai/planner.js";
 import { createBranch } from "./branches/branchService.js";
 import { publishIssueComment } from "./comments/issueCommentService.js";
+import { collectCiStatus } from "./ci/ciStatusService.js";
 import { configForRepository, loadConfig } from "./config.js";
 import { buildRepositoryContext } from "./context/repositoryContext.js";
 import { captureDiff } from "./diff/diffService.js";
@@ -14,6 +15,7 @@ import {
   shouldPlanIssue
 } from "./github/issues.js";
 import { verifyGitHubSignature } from "./github/signature.js";
+import { providerHealth } from "./health/providerHealth.js";
 import { sendHtml } from "./http/html.js";
 import { readJsonRequest, sendJson } from "./http/json.js";
 import { runImplementation } from "./implementation/implementationService.js";
@@ -37,6 +39,7 @@ export function createApp({
   validationService = runValidation,
   reviewService = runReview,
   pullRequestService = createPullRequest,
+  ciStatusService = collectCiStatus,
   issueCommentService = publishIssueComment,
   aiSettingsStore
 }) {
@@ -53,8 +56,12 @@ export function createApp({
     "diff",
     "validation",
     "review",
-    "pullRequest"
+    "pullRequest",
+    "ciStatus"
   ];
+  const runningPipelines = new Set();
+  const queuedPipelines = new Map();
+  let pipelineQueue = Promise.resolve();
 
   function activeConfig() {
     return {
@@ -74,6 +81,11 @@ export function createApp({
       throw new Error(`Unsupported workflow stage: ${startStage}`);
     }
 
+    if (runningPipelines.has(id)) {
+      return { ok: false, reason: "workflow_pipeline_running" };
+    }
+
+    runningPipelines.add(id);
     let activeStage = startStage;
 
     try {
@@ -106,6 +118,13 @@ export function createApp({
         } else if (stage === "pullRequest") {
           const pullRequest = await pullRequestService({ config: workflowConfig, workflow });
           store.markPullRequestCreated(id, pullRequest);
+        } else if (stage === "ciStatus") {
+          if (workflowConfig.ciProvider !== "none") {
+            const ciStatus = await ciStatusService({ config: workflowConfig, workflow });
+            if (ciStatus) {
+              store.markCiStatusCollected(id, ciStatus);
+            }
+          }
         }
       }
     } catch (error) {
@@ -125,8 +144,44 @@ export function createApp({
         store.markReviewFailed(id, error);
       } else if (activeStage === "pullRequest") {
         store.markPullRequestCreationFailed(id, error);
+      } else if (activeStage === "ciStatus") {
+        store.markCiStatusFailed(id, error);
       }
+    } finally {
+      runningPipelines.delete(id);
     }
+
+    return { ok: true };
+  }
+
+  function queueWorkflowPipeline(id, startStage, source) {
+    if (runningPipelines.has(id) || queuedPipelines.has(id)) {
+      return { ok: false, reason: "workflow_pipeline_running" };
+    }
+
+    const queued = store.markWorkflowQueued(id, { stage: startStage, source });
+    if (!queued.ok) {
+      return queued;
+    }
+
+    queuedPipelines.set(id, startStage);
+    pipelineQueue = pipelineQueue
+      .catch(() => {})
+      .then(async () => {
+        queuedPipelines.delete(id);
+        await runWorkflowPipeline(id, startStage);
+        await publishWorkflowComment(id, "status");
+      });
+
+    return { ok: true, queued: true };
+  }
+
+  async function startWorkflowPipeline(id, startStage, source) {
+    if (appConfig.workflowExecutionMode === "async") {
+      return queueWorkflowPipeline(id, startStage, source);
+    }
+
+    return runWorkflowPipeline(id, startStage);
   }
 
   async function publishWorkflowComment(id, kind) {
@@ -223,12 +278,19 @@ export function createApp({
     }
 
     if (decision === "approve") {
-      await runWorkflowPipeline(id);
+      const pipeline = await startWorkflowPipeline(id, "branch", "dashboard");
+      if (!pipeline.ok) {
+        sendJson(response, 409, {
+          error: pipeline.reason,
+          workflow: store.get(id)
+        });
+        return;
+      }
     }
     await publishWorkflowComment(id, "status");
 
     const workflow = store.get(id);
-    sendJson(response, 200, {
+    sendJson(response, appConfig.workflowExecutionMode === "async" && decision === "approve" ? 202 : 200, {
       status: workflow.status,
       workflow
     });
@@ -244,6 +306,14 @@ export function createApp({
       return;
     }
 
+    if (runningPipelines.has(id) || queuedPipelines.has(id)) {
+      sendJson(response, 409, {
+        error: "workflow_pipeline_running",
+        workflow: store.get(id)
+      });
+      return;
+    }
+
     const result = store.requestRetry(id, parsed.body || {});
 
     if (!result.ok) {
@@ -255,11 +325,18 @@ export function createApp({
       return;
     }
 
-    await runWorkflowPipeline(id, result.stage);
+    const pipeline = await startWorkflowPipeline(id, result.stage, "dashboard");
+    if (!pipeline.ok) {
+      sendJson(response, 409, {
+        error: pipeline.reason,
+        workflow: store.get(id)
+      });
+      return;
+    }
     await publishWorkflowComment(id, "status");
 
     const workflow = store.get(id);
-    sendJson(response, 200, {
+    sendJson(response, appConfig.workflowExecutionMode === "async" ? 202 : 200, {
       status: workflow.status,
       workflow
     });
@@ -312,13 +389,22 @@ export function createApp({
     }
 
     if (command === "approve") {
-      await runWorkflowPipeline(id);
+      const pipeline = await startWorkflowPipeline(id, "branch", "issue_comment");
+      if (!pipeline.ok) {
+        return {
+          statusCode: 409,
+          body: {
+            error: pipeline.reason,
+            workflow: store.get(id)
+          }
+        };
+      }
     }
     await publishWorkflowComment(id, "status");
 
     const workflow = store.get(id);
     return {
-      statusCode: 200,
+      statusCode: appConfig.workflowExecutionMode === "async" && command === "approve" ? 202 : 200,
       body: {
         status: workflow.status,
         workflow
@@ -328,6 +414,29 @@ export function createApp({
 
   async function route(request, response) {
     const url = new URL(request.url, "http://localhost");
+
+    function dashboardAuthOk() {
+      if (!appConfig.dashboardToken) {
+        return true;
+      }
+
+      const header = request.headers.authorization || "";
+      const match = header.match(/^Bearer\s+(.+)$/i);
+      return match?.[1] === appConfig.dashboardToken;
+    }
+
+    function requireDashboardAuth() {
+      if (dashboardAuthOk()) {
+        return true;
+      }
+
+      response.setHeader("www-authenticate", "Bearer");
+      sendJson(response, 401, {
+        error: "unauthorized",
+        message: "Dashboard token is required."
+      });
+      return false;
+    }
 
     if (request.method === "GET" && url.pathname === "/") {
       sendHtml(response, 200, dashboardHtml());
@@ -339,12 +448,20 @@ export function createApp({
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/health/providers") {
+      if (!requireDashboardAuth()) return;
+      sendJson(response, 200, providerHealth(activeConfig()));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/settings/ai") {
+      if (!requireDashboardAuth()) return;
       sendJson(response, 200, aiSettings.getPublicSettings());
       return;
     }
 
     if (request.method === "PUT" && url.pathname === "/settings/ai") {
+      if (!requireDashboardAuth()) return;
       await handleAiSettingsUpdate(request, response);
       return;
     }
@@ -355,30 +472,35 @@ export function createApp({
     }
 
     if (request.method === "GET" && url.pathname === "/workflows") {
+      if (!requireDashboardAuth()) return;
       sendJson(response, 200, { workflows: store.list() });
       return;
     }
 
     const approvalMatch = url.pathname.match(/^\/workflows\/(.+)\/approve$/);
     if (request.method === "POST" && approvalMatch) {
+      if (!requireDashboardAuth()) return;
       await handleWorkflowDecision(request, response, decodeURIComponent(approvalMatch[1]), "approve");
       return;
     }
 
     const rejectionMatch = url.pathname.match(/^\/workflows\/(.+)\/reject$/);
     if (request.method === "POST" && rejectionMatch) {
+      if (!requireDashboardAuth()) return;
       await handleWorkflowDecision(request, response, decodeURIComponent(rejectionMatch[1]), "reject");
       return;
     }
 
     const retryMatch = url.pathname.match(/^\/workflows\/(.+)\/retry$/);
     if (request.method === "POST" && retryMatch) {
+      if (!requireDashboardAuth()) return;
       await handleWorkflowRetry(request, response, decodeURIComponent(retryMatch[1]));
       return;
     }
 
     const workflowMatch = url.pathname.match(/^\/workflows\/(.+)$/);
     if (request.method === "GET" && workflowMatch) {
+      if (!requireDashboardAuth()) return;
       const workflow = store.get(decodeURIComponent(workflowMatch[1]));
       sendJson(response, workflow ? 200 : 404, workflow || { error: "workflow_not_found" });
       return;
@@ -389,6 +511,17 @@ export function createApp({
 
   return {
     store,
+    queue: {
+      pending() {
+        return queuedPipelines.size;
+      },
+      running() {
+        return runningPipelines.size;
+      },
+      drain() {
+        return pipelineQueue.catch(() => {});
+      }
+    },
     server: createServer((request, response) => {
       route(request, response).catch((error) => {
         sendJson(response, 500, { error: "internal_error", message: error.message });

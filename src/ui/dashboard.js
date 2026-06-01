@@ -129,6 +129,75 @@ export function dashboardHtml() {
         padding: 16px;
       }
 
+      .health-shell {
+        margin-bottom: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 16px;
+      }
+
+      .health-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .health-item {
+        display: grid;
+        grid-template-columns: 78px minmax(120px, 180px) 1fr;
+        gap: 8px;
+        align-items: start;
+        border-top: 1px solid var(--line);
+        padding-top: 8px;
+      }
+
+      .health-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .health-badge.ok {
+        background: #e6f4ea;
+        color: var(--ok);
+      }
+
+      .health-badge.warn {
+        background: #fef7e0;
+        color: #8a5a00;
+      }
+
+      .health-badge.fail {
+        background: #fce8e6;
+        color: var(--danger);
+      }
+
+      .auth-shell {
+        display: none;
+        margin-bottom: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 12px;
+      }
+
+      .auth-shell.active {
+        display: block;
+      }
+
+      .auth-form {
+        display: flex;
+        gap: 8px;
+        align-items: end;
+        flex-wrap: wrap;
+      }
+
       .settings-header {
         display: flex;
         align-items: center;
@@ -227,6 +296,43 @@ export function dashboardHtml() {
       .kv span {
         color: var(--muted);
         font-size: 12px;
+      }
+
+      .diff-summary {
+        display: grid;
+        gap: 12px;
+      }
+
+      .file-list {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .file-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 28px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 10px;
+        background: #ffffff;
+        max-width: 100%;
+      }
+
+      .file-pill strong {
+        font-size: 12px;
+      }
+
+      .file-pill code {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .diff-pre {
+        max-height: 520px;
       }
 
       pre {
@@ -343,6 +449,24 @@ export function dashboardHtml() {
         </label>
         <div id="summary" aria-live="polite"></div>
       </div>
+      <section id="auth-shell" class="auth-shell" aria-label="Dashboard access">
+        <form id="auth-form" class="auth-form">
+          <label>
+            Dashboard Token
+            <input id="dashboard-token" type="password" autocomplete="off">
+          </label>
+          <button class="primary" type="submit">Unlock</button>
+          <button id="clear-dashboard-token" type="button">Clear</button>
+          <span id="auth-status" class="notice" aria-live="polite"></span>
+        </form>
+      </section>
+      <section class="health-shell" aria-label="Provider health">
+        <div class="settings-header">
+          <h2>Readiness</h2>
+          <button id="refresh-health" type="button">Check</button>
+        </div>
+        <div id="health-panel" class="notice" aria-live="polite">Checking readiness...</div>
+      </section>
       <section class="settings-shell" aria-label="AI settings">
         <div class="settings-header">
           <h2>AI Settings</h2>
@@ -387,6 +511,11 @@ export function dashboardHtml() {
       const detail = document.getElementById("detail");
       const summary = document.getElementById("summary");
       const reviewer = document.getElementById("reviewer");
+      const authShell = document.getElementById("auth-shell");
+      const authForm = document.getElementById("auth-form");
+      const dashboardToken = document.getElementById("dashboard-token");
+      const clearDashboardToken = document.getElementById("clear-dashboard-token");
+      const authStatus = document.getElementById("auth-status");
       const aiSettingsForm = document.getElementById("ai-settings-form");
       const aiProvider = document.getElementById("ai-provider");
       const aiModel = document.getElementById("ai-model");
@@ -394,11 +523,32 @@ export function dashboardHtml() {
       const aiApiKey = document.getElementById("ai-api-key");
       const aiClearKey = document.getElementById("ai-clear-key");
       const aiSettingsStatus = document.getElementById("ai-settings-status");
+      const healthPanel = document.getElementById("health-panel");
+      const tokenStorageKey = "ai-sde-dashboard-token";
       let aiSettings = null;
+
+      function authHeaders(headers = {}) {
+        const token = localStorage.getItem(tokenStorageKey);
+        return token ? { ...headers, authorization: "Bearer " + token } : headers;
+      }
+
+      async function apiFetch(url, options = {}) {
+        const response = await fetch(url, {
+          ...options,
+          headers: authHeaders(options.headers || {})
+        });
+
+        if (response.status === 401) {
+          authShell.classList.add("active");
+          authStatus.textContent = "Enter DASHBOARD_TOKEN to continue.";
+        }
+
+        return response;
+      }
 
       function statusClass(status) {
         if (status.includes("failed") || status.includes("rejected")) return "failed";
-        if (["pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
+        if (["ci_passed", "pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
         return "";
       }
 
@@ -411,7 +561,8 @@ export function dashboardHtml() {
           "diff_capture_failed",
           "validation_failed",
           "review_failed",
-          "pr_creation_failed"
+          "pr_creation_failed",
+          "ci_status_failed"
         ].includes(status);
       }
 
@@ -442,6 +593,58 @@ export function dashboardHtml() {
 
       function compactList(values) {
         return values?.length ? values.join(", ") : "None";
+      }
+
+      function changedFileCount(diff) {
+        return diff?.changedFiles?.length || 0;
+      }
+
+      function renderChangedFiles(diff) {
+        const files = diff?.changedFiles || [];
+        if (!files.length) {
+          return '<div class="empty">No changed files captured.</div>';
+        }
+
+        return '<div class="file-list">' + files.map((file) => \`
+          <span class="file-pill">
+            <strong>\${html(file.status || "?")}</strong>
+            <code>\${html(file.path || "")}</code>
+          </span>
+        \`).join("") + '</div>';
+      }
+
+      function renderDiffSection(diff) {
+        const diffText = diff?.diff || "";
+        const statText = diff?.diffStat || "";
+        const comparison = diff?.comparison ? '<div class="kv"><span>Comparison</span><strong>' + html(diff.comparison) + '</strong></div>' : "";
+        const truncated = diff?.truncated ? '<div class="kv"><span>Diff</span><strong>Truncated</strong></div>' : "";
+
+        if (!diff?.captured) {
+          return \`
+            <div class="diff-summary">
+              <div class="empty">\${html(diff?.reason ? "Diff capture skipped: " + diff.reason : "No diff captured.")}</div>
+            </div>
+          \`;
+        }
+
+        return \`
+          <div class="diff-summary">
+            <div class="detail-grid">
+              <div class="kv"><span>Changed Files</span><strong>\${html(changedFileCount(diff))}</strong></div>
+              \${comparison}
+              \${truncated}
+            </div>
+            \${renderChangedFiles(diff)}
+            <div>
+              <h3>Diff Stat</h3>
+              <pre>\${html(statText || "No diff stat captured.")}</pre>
+            </div>
+            <div>
+              <h3>Patch Preview</h3>
+              <pre class="diff-pre">\${html(diffText || "No patch body captured.")}</pre>
+            </div>
+          </div>
+        \`;
       }
 
       function providerLabel(provider) {
@@ -480,11 +683,43 @@ export function dashboardHtml() {
         const keyStatus = ["openai", "anthropic", "gemini"].includes(settings.provider)
           ? (hasKey ? "key configured" : "no key saved")
           : "no API key needed";
-        aiSettingsStatus.textContent = providerLabel(settings.provider) + (settings.model ? " · " + settings.model : "") + " · " + keyStatus;
+        aiSettingsStatus.textContent = providerLabel(settings.provider) + (settings.model ? " - " + settings.model : "") + " - " + keyStatus;
+      }
+
+      function renderHealth(health) {
+        const checks = health?.checks || [];
+        if (!checks.length) {
+          healthPanel.className = "notice";
+          healthPanel.textContent = "No readiness checks returned.";
+          return;
+        }
+
+        healthPanel.className = "health-list";
+        healthPanel.innerHTML = checks.map((item) => \`
+          <div class="health-item">
+            <span class="health-badge \${html(item.status)}">\${html(item.status)}</span>
+            <strong>\${html(item.name)}</strong>
+            <span>\${html(item.message)}</span>
+          </div>
+        \`).join("");
+      }
+
+      async function loadHealth() {
+        healthPanel.className = "notice";
+        healthPanel.textContent = "Checking readiness...";
+
+        const response = await apiFetch("/health/providers");
+        const health = await response.json();
+
+        if (!response.ok) {
+          throw new Error(health.message || health.error || "Could not load readiness checks");
+        }
+
+        renderHealth(health);
       }
 
       async function loadAiSettings() {
-        const response = await fetch("/settings/ai");
+        const response = await apiFetch("/settings/ai");
         const settings = await response.json();
 
         if (!response.ok) {
@@ -498,7 +733,7 @@ export function dashboardHtml() {
         event.preventDefault();
         aiSettingsStatus.textContent = "Saving...";
 
-        const response = await fetch("/settings/ai", {
+        const response = await apiFetch("/settings/ai", {
           method: "PUT",
           headers: {
             "content-type": "application/json"
@@ -520,7 +755,7 @@ export function dashboardHtml() {
       }
 
       async function decide(id, decision) {
-        const response = await fetch("/workflows/" + encodeURIComponent(id) + "/" + decision, {
+        const response = await apiFetch("/workflows/" + encodeURIComponent(id) + "/" + decision, {
           method: "POST",
           headers: {
             "content-type": "application/json"
@@ -542,7 +777,7 @@ export function dashboardHtml() {
         detail.hidden = false;
         detail.innerHTML = '<div class="empty">Loading workflow detail...</div>';
 
-        const response = await fetch("/workflows/" + encodeURIComponent(id));
+        const response = await apiFetch("/workflows/" + encodeURIComponent(id));
         const workflow = await response.json();
 
         if (!response.ok) {
@@ -591,7 +826,7 @@ export function dashboardHtml() {
           </div>
           <div class="detail-section">
             <h3>Diff</h3>
-            <pre>\${html(workflow.diff?.diff || workflow.diff?.diffStat || "No diff captured.")}</pre>
+            \${renderDiffSection(workflow.diff)}
           </div>
           <div class="detail-section">
             <h3>Validation</h3>
@@ -604,6 +839,10 @@ export function dashboardHtml() {
           <div class="detail-section">
             <h3>Pull Request</h3>
             <pre>\${jsonBlock(workflow.pullRequest)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>CI Status</h3>
+            <pre>\${jsonBlock(workflow.ciStatus)}</pre>
           </div>
         \`;
       }
@@ -648,8 +887,11 @@ export function dashboardHtml() {
         app.textContent = "Loading workflows...";
 
         try {
-          const response = await fetch("/workflows");
+          const response = await apiFetch("/workflows");
           const body = await response.json();
+          if (!response.ok) {
+            throw new Error(body.message || body.error || "Could not load workflows");
+          }
           render(body.workflows || []);
         } catch (error) {
           app.className = "error";
@@ -658,6 +900,27 @@ export function dashboardHtml() {
       }
 
       document.getElementById("refresh").addEventListener("click", loadWorkflows);
+      document.getElementById("refresh-health").addEventListener("click", () => {
+        loadHealth().catch((error) => {
+          healthPanel.className = "error";
+          healthPanel.textContent = error.message;
+        });
+      });
+      authForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        localStorage.setItem(tokenStorageKey, dashboardToken.value);
+        dashboardToken.value = "";
+        authStatus.textContent = "Token saved.";
+        authShell.classList.remove("active");
+        await loadAiSettings();
+        await loadHealth();
+        await loadWorkflows();
+      });
+      clearDashboardToken.addEventListener("click", () => {
+        localStorage.removeItem(tokenStorageKey);
+        dashboardToken.value = "";
+        authStatus.textContent = "Token cleared.";
+      });
       aiProvider.addEventListener("change", () => {
         refreshModelOptions();
         selectDefaultModelForProvider();
@@ -701,6 +964,10 @@ export function dashboardHtml() {
 
       loadAiSettings().catch((error) => {
         aiSettingsStatus.textContent = error.message;
+      });
+      loadHealth().catch((error) => {
+        healthPanel.className = "error";
+        healthPanel.textContent = error.message;
       });
       loadWorkflows();
     </script>

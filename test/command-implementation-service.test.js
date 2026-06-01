@@ -30,6 +30,13 @@ async function workflow() {
       validationCommands: ["npm test"]
     },
     repositoryInspection: {
+      repositoryInstructions: [
+        {
+          path: "AGENTS.md",
+          content: "Use focused changes and add tests.",
+          truncated: false
+        }
+      ],
       searchMatches: [
         {
           path: "src/auth.ts"
@@ -91,6 +98,8 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.equal(implementation.stderr, "[REDACTED]");
   assert.match(prompt, /Fix login crash/);
   assert.match(prompt, /src\/auth\.ts/);
+  assert.match(prompt, /AGENTS\.md/);
+  assert.match(prompt, /Use focused changes and add tests/);
   assert.deepEqual(implementation.validationCommands, ["npm test", "npm run lint"]);
 });
 

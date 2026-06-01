@@ -37,3 +37,34 @@ test("keeps global config when repository has no override", () => {
 
   assert.equal(repositoryConfig.validationProvider, "mock");
 });
+
+test("loads dashboard token from env", () => {
+  const config = loadConfig({
+    DASHBOARD_TOKEN: "local-secret"
+  });
+
+  assert.equal(config.dashboardToken, "local-secret");
+});
+
+test("loads workflow execution mode from env", () => {
+  const config = loadConfig({
+    WORKFLOW_EXECUTION_MODE: "async"
+  });
+
+  assert.equal(config.workflowExecutionMode, "async");
+});
+
+test("defaults workflow persistence to sqlite", () => {
+  const config = loadConfig({});
+
+  assert.equal(config.workflowStoreProvider, "sqlite");
+  assert.equal(config.workflowStorePath, "var/data/workflows.sqlite");
+});
+
+test("loads CI provider from env", () => {
+  const config = loadConfig({
+    CI_PROVIDER: "github"
+  });
+
+  assert.equal(config.ciProvider, "github");
+});

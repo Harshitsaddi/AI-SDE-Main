@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createAuditLogger } from "../audit/auditLog.js";
+import { createSqliteWorkflowStore } from "./sqliteStore.js";
 import { WorkflowStore } from "./store.js";
 
 function readWorkflows(filePath) {
@@ -34,6 +35,13 @@ export function createWorkflowStore(config) {
     return new WorkflowStore({
       workflows: readWorkflows(filePath),
       onChange: (workflows) => writeWorkflows(filePath, workflows),
+      onAudit
+    });
+  }
+
+  if (config.workflowStoreProvider === "sqlite") {
+    return createSqliteWorkflowStore({
+      workflowStorePath: config.workflowStorePath,
       onAudit
     });
   }

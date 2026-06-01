@@ -72,6 +72,7 @@ export function configForRepository(config, repositoryFullName) {
 export function loadConfig(env = process.env) {
   return {
     port: Number(env.PORT || 3000),
+    dashboardToken: env.DASHBOARD_TOKEN || "",
     githubWebhookSecret: env.GITHUB_WEBHOOK_SECRET || "",
     aiProvider: env.AI_PROVIDER || "mock",
     aiModel: env.AI_MODEL || "",
@@ -131,10 +132,12 @@ export function loadConfig(env = process.env) {
     reviewProvider: env.REVIEW_PROVIDER || "mock",
     prProvider: env.PR_PROVIDER || "mock",
     prDraft: env.PR_DRAFT !== "false",
+    ciProvider: env.CI_PROVIDER || "none",
     issueCommentProvider: env.ISSUE_COMMENT_PROVIDER || "none",
     auditLogProvider: env.AUDIT_LOG_PROVIDER || "none",
     auditLogPath: env.AUDIT_LOG_PATH || "var/audit/workflow-audit.jsonl",
-    workflowStoreProvider: env.WORKFLOW_STORE_PROVIDER || "file",
-    workflowStorePath: env.WORKFLOW_STORE_PATH || "var/data/workflows.json"
+    workflowExecutionMode: env.WORKFLOW_EXECUTION_MODE || "sync",
+    workflowStoreProvider: env.WORKFLOW_STORE_PROVIDER || "sqlite",
+    workflowStorePath: env.WORKFLOW_STORE_PATH || "var/data/workflows.sqlite"
   };
 }
