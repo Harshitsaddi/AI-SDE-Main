@@ -1,4 +1,5 @@
 import { createGitHubClientFromConfig } from "../github/auth.js";
+import { GitHubApiError } from "../github/client.js";
 import { splitRepositoryFullName } from "../github/repositories.js";
 
 function normalizeCheckRun(run) {
@@ -30,11 +31,37 @@ export async function collectCiStatus({ config, workflow, fetchImpl }) {
   const repository = workflow.planningInput.repository;
   const { owner, repo } = splitRepositoryFullName(repository.fullName);
   const client = await createGitHubClientFromConfig({ config, fetchImpl });
-  const body = await client.listCheckRunsForRef({
-    owner,
-    repo,
-    ref: workflow.branch.branchName
-  });
+  let body;
+
+  try {
+    body = await client.listCheckRunsForRef({
+      owner,
+      repo,
+      ref: workflow.branch.branchName
+    });
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.status === 403) {
+      return {
+        provider: "github",
+        passed: false,
+        status: "unavailable",
+        total: 0,
+        passedCount: 0,
+        failedCount: 0,
+        pendingCount: 0,
+        checkRuns: [],
+        error: {
+          status: error.status,
+          message: error.body?.message || error.message,
+          rateLimit: error.rateLimit,
+          retryAfter: error.retryAfter
+        },
+        summary: ciPermissionSummary(error)
+      };
+    }
+
+    throw error;
+  }
   const runs = (body.check_runs || []).map(normalizeCheckRun);
   const completed = runs.filter((run) => run.status === "completed");
   const failed = completed.filter((run) => !passedConclusion(run.conclusion));
@@ -54,4 +81,14 @@ export async function collectCiStatus({ config, workflow, fetchImpl }) {
       ? `${runs.length} GitHub check run(s): ${failed.length} failed, ${pending.length} pending.`
       : "No GitHub check runs found for the workflow branch."
   };
+}
+
+function ciPermissionSummary(error) {
+  const message = error.body?.message || error.message;
+
+  if (error.rateLimit?.remaining === 0) {
+    return `GitHub checks could not be read because the API rate limit is exhausted. Retry after reset time ${error.rateLimit.resetEpochSeconds || "unknown"}.`;
+  }
+
+  return `GitHub checks could not be read: ${message}. Add read-only Checks permission to the GitHub token/app, or set CI_PROVIDER=none to skip CI collection.`;
 }

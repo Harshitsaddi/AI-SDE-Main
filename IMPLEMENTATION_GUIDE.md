@@ -106,7 +106,7 @@ PR_PROVIDER=github_token
 ISSUE_COMMENT_PROVIDER=github_token
 ```
 
-Token permissions should include repository contents write access, pull request write access, and issue comment write access.
+Token permissions should include repository contents write access, pull request write access, issue comment write access, and read-only Checks access when `CI_PROVIDER=github` is enabled.
 
 For production-style auth, use a GitHub App:
 
@@ -338,7 +338,7 @@ CI_PROVIDER=github
 Then move one step at a time:
 
 1. Turn on real PRs with `PR_PROVIDER=github_token`.
-2. Turn on CI collection with `CI_PROVIDER=github`.
+2. Turn on CI collection with `CI_PROVIDER=github` after your token or GitHub App has read-only Checks access.
 3. Turn on model review with `REVIEW_PROVIDER=model`.
 4. Turn on local validation with `VALIDATION_PROVIDER=local`.
 5. Turn on command implementation with `IMPLEMENTATION_PROVIDER=command`.

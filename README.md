@@ -230,7 +230,7 @@ VALIDATION_COMMAND_OVERRIDES={"acme/app":["npm run ci","npm run lint"],"*":["npm
 
 `PR_PROVIDER=mock` prepares a pull request artifact without calling GitHub. Set `PR_PROVIDER=github_token` and provide `GITHUB_TOKEN` to create a real draft pull request. The GitHub provider checks for an existing open pull request from the workflow branch before creating a new one, so retrying a PR stage reuses the existing PR when possible.
 
-Set `CI_PROVIDER=github` to collect GitHub check runs for the workflow branch after pull request creation. Passing checks move the workflow to `ci_passed`; pending or failing checks are stored as `ci_pending`; API collection failures are retryable as `ci_status_failed`.
+Set `CI_PROVIDER=github` to collect GitHub check runs for the workflow branch after pull request creation. Passing checks move the workflow to `ci_passed`; pending, failing, or unavailable checks are stored as `ci_pending`; unexpected API collection failures are retryable as `ci_status_failed`. For fine-grained personal access tokens or GitHub Apps, grant read-only Checks access. If you do not need CI collection yet, set `CI_PROVIDER=none`.
 
 Set `ISSUE_COMMENT_PROVIDER=mock` to record plan/status comments on workflows without calling GitHub, or `ISSUE_COMMENT_PROVIDER=github_token` with `GITHUB_TOKEN` to publish issue comments. When enabled, plan comments tell maintainers to reply with `/ai approve` or `/ai reject`; `issue_comment` webhooks with those commands approve or reject the workflow.
 

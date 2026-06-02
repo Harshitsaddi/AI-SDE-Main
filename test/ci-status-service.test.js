@@ -91,3 +91,23 @@ test("collects pending and failed GitHub check runs", async () => {
   assert.equal(ci.failedCount, 1);
   assert.equal(ci.pendingCount, 1);
 });
+
+test("records GitHub check API permission failures as unavailable CI", async () => {
+  const ci = await collectCiStatus({
+    config: {
+      ciProvider: "github",
+      githubToken: "token",
+      githubApiBaseUrl: "https://api.github.test"
+    },
+    workflow: workflow(),
+    fetchImpl: async () => response(403, {
+      message: "Resource not accessible by personal access token"
+    })
+  });
+
+  assert.equal(ci.passed, false);
+  assert.equal(ci.status, "unavailable");
+  assert.equal(ci.error.status, 403);
+  assert.match(ci.summary, /Checks permission/);
+  assert.match(ci.summary, /CI_PROVIDER=none/);
+});
