@@ -145,6 +145,64 @@ test("requires dashboard token for workflow and settings APIs when configured", 
   });
 });
 
+test("lists repositories and filters workflows by repository", async () => {
+  const store = new WorkflowStore();
+  const first = store.createFromPlan({
+    planningInput: {
+      repository: {
+        fullName: "acme/app"
+      },
+      issue: {
+        number: 1,
+        title: "Fix app"
+      }
+    },
+    plan: {
+      provider: "mock",
+      status: "planned"
+    }
+  });
+  store.createFromPlan({
+    planningInput: {
+      repository: {
+        fullName: "acme/api"
+      },
+      issue: {
+        number: 2,
+        title: "Fix api"
+      }
+    },
+    plan: {
+      provider: "mock",
+      status: "planned"
+    }
+  });
+
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock"
+    },
+    store
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const repositoriesResponse = await fetch(`${baseUrl}/repositories`);
+    const repositoriesBody = await repositoriesResponse.json();
+    const workflowsResponse = await fetch(`${baseUrl}/workflows?repository=${encodeURIComponent("acme/app")}`);
+    const workflowsBody = await workflowsResponse.json();
+
+    assert.equal(repositoriesResponse.status, 200);
+    assert.deepEqual(
+      repositoriesBody.repositories.map((repository) => repository.fullName).sort(),
+      ["acme/api", "acme/app"]
+    );
+    assert.equal(workflowsResponse.status, 200);
+    assert.equal(workflowsBody.repository, "acme/app");
+    assert.deepEqual(workflowsBody.workflows.map((workflow) => workflow.id), [first.id]);
+  });
+});
+
 test("rejects concurrent retries for the same workflow", async () => {
   const store = new WorkflowStore();
   const workflow = store.createFromPlan({

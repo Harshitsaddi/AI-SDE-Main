@@ -447,6 +447,12 @@ export function dashboardHtml() {
           Reviewer
           <input id="reviewer" value="human-reviewer" autocomplete="name">
         </label>
+        <label>
+          Repository
+          <select id="repository-filter">
+            <option value="">All repositories</option>
+          </select>
+        </label>
         <div id="summary" aria-live="polite"></div>
       </div>
       <section id="auth-shell" class="auth-shell" aria-label="Dashboard access">
@@ -511,6 +517,7 @@ export function dashboardHtml() {
       const detail = document.getElementById("detail");
       const summary = document.getElementById("summary");
       const reviewer = document.getElementById("reviewer");
+      const repositoryFilter = document.getElementById("repository-filter");
       const authShell = document.getElementById("auth-shell");
       const authForm = document.getElementById("auth-form");
       const dashboardToken = document.getElementById("dashboard-token");
@@ -526,6 +533,7 @@ export function dashboardHtml() {
       const healthPanel = document.getElementById("health-panel");
       const tokenStorageKey = "ai-sde-dashboard-token";
       let aiSettings = null;
+      let repositories = [];
 
       function authHeaders(headers = {}) {
         const token = localStorage.getItem(tokenStorageKey);
@@ -704,6 +712,29 @@ export function dashboardHtml() {
         \`).join("");
       }
 
+      function renderRepositories(items) {
+        const selected = repositoryFilter.value;
+        repositories = items || [];
+        repositoryFilter.innerHTML = '<option value="">All repositories</option>' + repositories.map((item) => (
+          '<option value="' + html(item.fullName) + '">' +
+          html(item.fullName) +
+          ' (' + html(item.workflowCount || 0) + ')' +
+          '</option>'
+        )).join("");
+        repositoryFilter.value = repositories.some((item) => item.fullName === selected) ? selected : "";
+      }
+
+      async function loadRepositories() {
+        const response = await apiFetch("/repositories");
+        const body = await response.json();
+
+        if (!response.ok) {
+          throw new Error(body.message || body.error || "Could not load repositories");
+        }
+
+        renderRepositories(body.repositories || []);
+      }
+
       async function loadHealth() {
         healthPanel.className = "notice";
         healthPanel.textContent = "Checking readiness...";
@@ -848,7 +879,8 @@ export function dashboardHtml() {
       }
 
       function render(workflows) {
-        summary.textContent = workflows.length + " workflow" + (workflows.length === 1 ? "" : "s");
+        const repoText = repositoryFilter.value ? " in " + repositoryFilter.value : "";
+        summary.textContent = workflows.length + " workflow" + (workflows.length === 1 ? "" : "s") + repoText;
 
         if (!workflows.length) {
           app.className = "empty";
@@ -887,7 +919,8 @@ export function dashboardHtml() {
         app.textContent = "Loading workflows...";
 
         try {
-          const response = await apiFetch("/workflows");
+          const query = repositoryFilter.value ? "?repository=" + encodeURIComponent(repositoryFilter.value) : "";
+          const response = await apiFetch("/workflows" + query);
           const body = await response.json();
           if (!response.ok) {
             throw new Error(body.message || body.error || "Could not load workflows");
@@ -900,6 +933,7 @@ export function dashboardHtml() {
       }
 
       document.getElementById("refresh").addEventListener("click", loadWorkflows);
+      repositoryFilter.addEventListener("change", loadWorkflows);
       document.getElementById("refresh-health").addEventListener("click", () => {
         loadHealth().catch((error) => {
           healthPanel.className = "error";
@@ -914,6 +948,7 @@ export function dashboardHtml() {
         authShell.classList.remove("active");
         await loadAiSettings();
         await loadHealth();
+        await loadRepositories();
         await loadWorkflows();
       });
       clearDashboardToken.addEventListener("click", () => {
@@ -969,7 +1004,7 @@ export function dashboardHtml() {
         healthPanel.className = "error";
         healthPanel.textContent = error.message;
       });
-      loadWorkflows();
+      loadRepositories().finally(loadWorkflows);
     </script>
   </body>
 </html>`;

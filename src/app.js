@@ -481,7 +481,17 @@ export function createApp({
 
     if (request.method === "GET" && url.pathname === "/workflows") {
       if (!requireDashboardAuth()) return;
-      sendJson(response, 200, { workflows: store.list() });
+      const repository = url.searchParams.get("repository") || "";
+      sendJson(response, 200, {
+        workflows: store.listByRepository(repository),
+        repository: repository || null
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/repositories") {
+      if (!requireDashboardAuth()) return;
+      sendJson(response, 200, { repositories: store.listRepositories() });
       return;
     }
 

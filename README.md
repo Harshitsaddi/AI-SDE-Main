@@ -150,7 +150,11 @@ X-Hub-Signature-256: sha256=...
 
 ### `GET /workflows`
 
-Lists stored workflows.
+Lists stored workflows. Pass `?repository=owner/repo` to filter the list for one repository.
+
+### `GET /repositories`
+
+Lists repositories seen from stored workflows, with workflow counts and latest update timestamps. The dashboard uses this to switch between all repositories and a single repository view.
 
 ### `GET /workflows/:id`
 

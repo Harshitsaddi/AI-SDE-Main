@@ -73,6 +73,42 @@ export class WorkflowStore {
     return [...this.#workflows.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
+  listByRepository(repositoryFullName) {
+    if (!repositoryFullName) {
+      return this.list();
+    }
+
+    return this.list().filter((workflow) => (
+      workflow.planningInput?.repository?.fullName === repositoryFullName
+    ));
+  }
+
+  listRepositories() {
+    const summaries = new Map();
+
+    for (const workflow of this.#workflows.values()) {
+      const fullName = workflow.planningInput?.repository?.fullName || "unknown";
+      const current = summaries.get(fullName) || {
+        fullName,
+        workflowCount: 0,
+        openCount: 0,
+        latestUpdatedAt: workflow.updatedAt
+      };
+
+      current.workflowCount += 1;
+      if (!["rejected", "no_changes", "needs_clarification", "ci_passed", "pr_created"].includes(workflow.status)) {
+        current.openCount += 1;
+      }
+      if (workflow.updatedAt > current.latestUpdatedAt) {
+        current.latestUpdatedAt = workflow.updatedAt;
+      }
+
+      summaries.set(fullName, current);
+    }
+
+    return [...summaries.values()].sort((a, b) => b.latestUpdatedAt.localeCompare(a.latestUpdatedAt));
+  }
+
   get(id) {
     return this.#workflows.get(id) || null;
   }
