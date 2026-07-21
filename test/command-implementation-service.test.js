@@ -102,6 +102,9 @@ test("runs a configured implementation command with prompt placeholders", async 
   assert.doesNotMatch(prompt, /Unknown - No issue body provided/);
   assert.match(prompt, /AGENTS\.md/);
   assert.match(prompt, /Use focused changes and add tests/);
+  assert.match(prompt, /already been approved for implementation/);
+  assert.match(prompt, /Do not ask for confirmation/);
+  assert.match(prompt, /create them now/);
   assert.deepEqual(implementation.validationCommands, ["npm test", "npm run lint"]);
 });
 
@@ -186,6 +189,34 @@ test("marks one-clarification aider output as needing clarification", async () =
 
   assert.equal(implementation.applied, false);
   assert.equal(implementation.needsClarification, true);
+});
+
+test("marks confirmation-before-creating-files output as needing clarification", async () => {
+  const implementation = await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "gemini",
+      aiModel: "gemini-3.1-flash-lite",
+      aiApiKey: "AIza-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: await workflow(),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "To implement the requested changes for creating a simple website, I will need to create three new files: index.html, style.css, and script.js. Since these are new files and not existing ones, I am ready to proceed with creating them. Please confirm if you would like me to generate the content for these files now.",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(implementation.applied, false);
+  assert.equal(implementation.needsClarification, true);
+  assert.match(implementation.summary, /requested clarification/);
 });
 
 test("does not treat ordinary safe-change output as clarification", async () => {

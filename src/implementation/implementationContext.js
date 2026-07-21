@@ -61,6 +61,13 @@ export function implementationPromptForWorkflow(workflow) {
     "## Validation Commands",
     ...(validationCommands.length ? validationCommands.map((command) => `- ${command}`) : ["- None detected"]),
     "",
+    "## Execution Authority",
+    "This workflow has already been approved for implementation by AI-SDE.",
+    "Do not ask for confirmation before making in-scope changes.",
+    "If the approved plan requires creating new files, create them now.",
+    "If the approved plan requires editing existing files, edit them now.",
+    "Only ask for clarification when required information is genuinely missing and you cannot safely infer it from the issue, clarification comments, plan, and repository files.",
+    "",
     "Use only the issue details and repository files available in this workspace. Do not browse or scrape the GitHub issue URL.",
     "If the issue is too ambiguous to safely change code, do not edit files; explain the clarification needed in your output.",
     "Make the smallest safe code change that resolves the issue. Add or update focused tests when appropriate."

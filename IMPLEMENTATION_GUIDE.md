@@ -191,6 +191,8 @@ IMPLEMENTATION_COMMAND_TIMEOUT_MS=600000
 
 If the command times out, the first thing to check is whether the agent is waiting for confirmation or trying to use a model without the dashboard-selected API key. `--yes` keeps Aider noninteractive, `--no-gitignore` avoids Aider editing `.gitignore`, and `{aiModel}` lets the dashboard-selected model flow through directly.
 
+The implementation prompt tells the agent that the workflow is already approved and that it should create planned new files without asking for another confirmation. If the agent still asks for confirmation, AI-SDE treats that as clarification/no-edit and stops before validation, review, or PR creation.
+
 For Gemini, keep the dashboard model as `gemini-2.5-flash` or `gemini-2.5-pro`. The implementation runner passes that to Aider as `gemini/gemini-...`, which uses a normal Google AI Studio `GEMINI_API_KEY` instead of Vertex AI project credentials.
 
 The implementation prompt does not include the GitHub issue URL. It uses the issue title/body already received from the webhook plus checked-out repository files, so Aider should not try to scrape GitHub. If Aider says the issue is ambiguous or asks for clarification, the workflow stops as `needs_clarification`.
