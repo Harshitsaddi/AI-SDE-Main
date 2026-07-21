@@ -218,6 +218,65 @@ test("uses normal issue comments as clarification context and replans automatica
   });
 });
 
+test("ignores AI SDE clarification comments to avoid repost loops", async () => {
+  let planCalls = 0;
+  let publishedComments = 0;
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      issueCommentProvider: "mock"
+    },
+    planService: async () => {
+      planCalls += 1;
+      return clarificationPlan();
+    },
+    issueCommentService: async ({ workflow, kind }) => {
+      publishedComments += 1;
+      return {
+        provider: "mock",
+        created: false,
+        issueNumber: workflow.planningInput.issue.number,
+        body: kind,
+        url: "mock://comment"
+      };
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+
+    const commentRawBody = Buffer.from(JSON.stringify(issueCommentPayload("## Clarification needed for #42: Fix login crash\n\n### Blocking questions\n- What should change?")));
+    const commentResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issue_comment",
+        "x-hub-signature-256": signPayload("secret", commentRawBody)
+      },
+      body: commentRawBody
+    });
+    const commentBody = await commentResponse.json();
+    const workflow = app.store.get("acme/app#issue-42");
+
+    assert.equal(commentResponse.status, 202);
+    assert.equal(commentBody.reason, "ai_sde_generated_comment");
+    assert.equal(workflow.status, "awaiting_clarification");
+    assert.equal(workflow.clarification.comments.length, 0);
+    assert.equal(planCalls, 1);
+    assert.equal(publishedComments, 1);
+  });
+});
+
 test("keeps slash commands from being treated as clarification comments", async () => {
   let planCalls = 0;
   const app = createApp({

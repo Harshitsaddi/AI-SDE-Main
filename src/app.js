@@ -8,6 +8,7 @@ import { configForRepository, loadConfig } from "./config.js";
 import { buildRepositoryContext } from "./context/repositoryContext.js";
 import { captureDiff } from "./diff/diffService.js";
 import {
+  isAiSdeGeneratedComment,
   issueCommentCommand,
   issueCommentEventToWorkflowId,
   issueEventToPlanningInput,
@@ -399,6 +400,16 @@ export function createApp({
     const id = issueCommentEventToWorkflowId(payload);
 
     if (!command) {
+      if (isAiSdeGeneratedComment(payload)) {
+        return {
+          statusCode: 202,
+          body: {
+            status: "ignored",
+            reason: "ai_sde_generated_comment"
+          }
+        };
+      }
+
       const workflow = store.get(id);
 
       if (workflow?.status === "awaiting_clarification") {

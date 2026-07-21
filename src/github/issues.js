@@ -22,6 +22,16 @@ export function issueCommentCommand(payload) {
   return null;
 }
 
+export function isAiSdeGeneratedComment(payload) {
+  const body = (payload.comment?.body || "").trim();
+
+  return [
+    "## AI implementation plan",
+    "## AI workflow status:",
+    "## Clarification needed"
+  ].some((prefix) => body.startsWith(prefix));
+}
+
 export function issueEventToPlanningInput(payload) {
   const issue = payload.issue || {};
   const repository = payload.repository || {};
