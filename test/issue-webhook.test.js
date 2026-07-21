@@ -42,6 +42,8 @@ function issueCommentPayload(body = "/ai approve") {
     comment: {
       id: 30,
       body,
+      html_url: "https://github.com/acme/app/issues/42#issuecomment-30",
+      created_at: "2026-07-21T10:00:00.000Z",
       user: { login: "sam" }
     },
     repository: {
@@ -53,6 +55,33 @@ function issueCommentPayload(body = "/ai approve") {
       html_url: "https://github.com/acme/app",
       owner: { login: "acme" }
     }
+  };
+}
+
+function normalPlan() {
+  return {
+    provider: "test",
+    status: "planned",
+    issueSummary: "Build the requested login dashboard.",
+    proposedBranchName: "ai/issue-42-login-dashboard",
+    risk: "low",
+    affectedAreas: ["app.js"],
+    implementationPlan: ["Replace app.js with a plain JavaScript login dashboard."],
+    validationCommands: ["open app in browser"],
+    humanReviewChecklist: ["Confirm login form renders."]
+  };
+}
+
+function clarificationPlan() {
+  return {
+    provider: "test",
+    status: "needs_clarification",
+    issueSummary: "The login dashboard request is underspecified.",
+    clarificationContext: "The current app.js file may be either a Node module or browser entrypoint.",
+    clarificationQuestions: [
+      "Should app.js be replaced entirely or should existing exports be preserved?",
+      "Should the dashboard require an existing HTML file?"
+    ]
   };
 }
 
@@ -94,6 +123,143 @@ test("creates an awaiting approval workflow for an opened issue webhook", async 
     assert.equal(body.workflowId, "acme/app#issue-42");
     assert.equal(body.plan.risk, "medium");
     assert.equal(app.store.list().length, 1);
+  });
+});
+
+test("creates an awaiting clarification workflow when planner asks focused questions", async () => {
+  const comments = [];
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      issueCommentProvider: "mock"
+    },
+    planService: async () => clarificationPlan(),
+    issueCommentService: async ({ workflow, kind }) => {
+      comments.push({ workflow, kind });
+      return {
+        provider: "mock",
+        created: false,
+        issueNumber: workflow.planningInput.issue.number,
+        body: kind,
+        url: "mock://comment"
+      };
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    const response = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+    const body = await response.json();
+    const workflow = app.store.get(body.workflowId);
+
+    assert.equal(response.status, 201);
+    assert.equal(body.status, "awaiting_clarification");
+    assert.equal(workflow.clarification.questions.length, 2);
+    assert.equal(comments[0].kind, "clarification");
+    assert.equal(workflow.events.at(-1).type, "issue_comment_published");
+  });
+});
+
+test("uses normal issue comments as clarification context and replans automatically", async () => {
+  const seenInputs = [];
+  let planCalls = 0;
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock",
+      issueCommentProvider: "mock"
+    },
+    planService: async ({ planningInput }) => {
+      planCalls += 1;
+      seenInputs.push(JSON.parse(JSON.stringify(planningInput)));
+      return planCalls === 1 ? clarificationPlan() : normalPlan();
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+
+    const commentPayload = issueCommentPayload("Replace app.js entirely. No HTML file exists; build the UI with JavaScript-created DOM nodes.");
+    const commentRawBody = Buffer.from(JSON.stringify(commentPayload));
+    const commentResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issue_comment",
+        "x-hub-signature-256": signPayload("secret", commentRawBody)
+      },
+      body: commentRawBody
+    });
+    const commentBody = await commentResponse.json();
+
+    assert.equal(commentResponse.status, 200);
+    assert.equal(commentBody.status, "awaiting_approval");
+    assert.equal(commentBody.workflow.clarification.comments.length, 1);
+    assert.match(seenInputs[1].issue.clarificationComments[0].body, /Replace app\.js entirely/);
+    assert.equal(commentBody.workflow.plan.proposedBranchName, "ai/issue-42-login-dashboard");
+  });
+});
+
+test("keeps slash commands from being treated as clarification comments", async () => {
+  let planCalls = 0;
+  const app = createApp({
+    config: {
+      githubWebhookSecret: "secret",
+      aiProvider: "mock"
+    },
+    planService: async () => {
+      planCalls += 1;
+      return clarificationPlan();
+    }
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const rawBody = Buffer.from(JSON.stringify(issuePayload()));
+    await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-hub-signature-256": signPayload("secret", rawBody)
+      },
+      body: rawBody
+    });
+
+    const commentRawBody = Buffer.from(JSON.stringify(issueCommentPayload("/ai approve")));
+    const commentResponse = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issue_comment",
+        "x-hub-signature-256": signPayload("secret", commentRawBody)
+      },
+      body: commentRawBody
+    });
+    const commentBody = await commentResponse.json();
+    const workflow = app.store.get("acme/app#issue-42");
+
+    assert.equal(commentResponse.status, 409);
+    assert.equal(commentBody.error, "workflow_not_awaiting_approval");
+    assert.equal(workflow.clarification.comments.length, 0);
+    assert.equal(planCalls, 1);
   });
 });
 

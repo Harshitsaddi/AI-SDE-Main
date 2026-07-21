@@ -9,11 +9,15 @@ const PROVIDER_NAMES = {
 };
 
 function planningPrompt({ planningInput, repositoryContext }) {
+  const clarificationComments = planningInput.issue.clarificationComments || [];
   return [
     "You are an AI software engineering planner.",
     "Return only valid JSON. Do not wrap the JSON in markdown.",
     "The JSON object must contain these fields:",
     "provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist.",
+    "If the issue lacks information required to make a safe implementation plan, return a JSON object with status: needs_clarification and clarificationQuestions: string[].",
+    "Ask only focused questions that block implementation. Do not ask broad or nice-to-have questions.",
+    "If the original issue plus clarification comments provide enough context, return a normal implementation plan even if the comment does not explicitly answer every previous question.",
     "risk must be a string with one of: low, medium, high.",
     "Use short, actionable strings in every array.",
     "",
@@ -23,6 +27,11 @@ function planningPrompt({ planningInput, repositoryContext }) {
     "",
     "Issue body:",
     planningInput.issue.body || "No issue body provided.",
+    clarificationComments.length ? "" : "",
+    clarificationComments.length ? "Clarification comments:" : "",
+    ...clarificationComments.map((comment, index) => (
+      `Comment ${index + 1} by ${comment.author || "unknown"} at ${comment.createdAt || "unknown"}:\n${comment.body}`
+    )),
     "",
     "Repository context:",
     JSON.stringify(repositoryContext, null, 2)
@@ -63,9 +72,22 @@ function safeBranchName(planningInput) {
 }
 
 function normalizeModelPlan({ plan, planningInput, repositoryContext }) {
+  const clarificationQuestions = stringArray(plan.clarificationQuestions, stringArray(plan.questions));
+  const status = firstString(plan.status);
+
+  if (status === "needs_clarification" || status === "awaiting_clarification" || clarificationQuestions.length) {
+    return {
+      provider: plan.provider,
+      status: "needs_clarification",
+      issueSummary: firstString(plan.issueSummary, plan.summary, planningInput.issue.title),
+      clarificationQuestions,
+      clarificationContext: firstString(plan.clarificationContext, plan.reason, plan.rationale)
+    };
+  }
+
   return {
     ...plan,
-    status: firstString(plan.status) || "plan_generated",
+    status: status || "plan_generated",
     issueSummary: firstString(plan.issueSummary, plan.summary, planningInput.issue.title),
     proposedBranchName: firstString(plan.proposedBranchName, plan.branchName) || safeBranchName(planningInput),
     risk: firstString(plan.risk, plan.riskLevel, plan.riskAssessment) || "medium",

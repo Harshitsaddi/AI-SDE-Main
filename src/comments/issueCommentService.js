@@ -1,4 +1,4 @@
-import { buildPlanComment, buildStatusComment } from "./commentBody.js";
+import { buildClarificationComment, buildPlanComment, buildStatusComment } from "./commentBody.js";
 import { createGitHubIssueComment } from "./githubIssueCommentService.js";
 import { createMockIssueComment } from "./mockIssueCommentService.js";
 
@@ -9,6 +9,10 @@ function commentBodyForKind(kind, workflow) {
 
   if (kind === "status") {
     return buildStatusComment(workflow);
+  }
+
+  if (kind === "clarification") {
+    return buildClarificationComment(workflow);
   }
 
   throw new Error(`Unsupported issue comment kind: ${kind}`);

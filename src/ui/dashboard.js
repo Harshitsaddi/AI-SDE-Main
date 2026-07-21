@@ -556,7 +556,7 @@ export function dashboardHtml() {
 
       function statusClass(status) {
         if (status.includes("failed") || status.includes("rejected")) return "failed";
-        if (["needs_clarification", "no_changes", "ci_passed", "pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
+        if (["needs_clarification", "awaiting_clarification", "replanning", "no_changes", "ci_passed", "pr_created", "review_completed", "validation_completed", "diff_captured", "implementation_completed", "repository_inspected", "workspace_prepared", "branch_created", "approved"].includes(status)) return "done";
         return "";
       }
 
@@ -601,6 +601,36 @@ export function dashboardHtml() {
 
       function compactList(values) {
         return values?.length ? values.join(", ") : "None";
+      }
+
+      function renderClarification(workflow) {
+        const clarification = workflow.clarification || {};
+        const questions = clarification.questions || workflow.plan?.clarificationQuestions || [];
+        const comments = clarification.comments || workflow.planningInput?.issue?.clarificationComments || [];
+
+        if (!questions.length && !comments.length && !clarification.context) {
+          return '<div class="empty">No clarification requested.</div>';
+        }
+
+        return \`
+          <div class="detail-grid">
+            <div class="kv"><span>Questions</span><strong>\${html(questions.length)}</strong></div>
+            <div class="kv"><span>Responses</span><strong>\${html(comments.length)}</strong></div>
+            <div class="kv"><span>Resolved</span><strong>\${html(clarification.resolvedAt ? new Date(clarification.resolvedAt).toLocaleString() : "No")}</strong></div>
+          </div>
+          \${clarification.context ? '<p>' + html(clarification.context) + '</p>' : ''}
+          <h3>Blocking Questions</h3>
+          <ul>\${questions.length ? questions.map((question) => '<li>' + html(question) + '</li>').join("") : '<li>None</li>'}</ul>
+          <h3>Clarification Comments</h3>
+          <div class="file-list">
+            \${comments.length ? comments.map((comment) => \`
+              <span class="file-pill">
+                <strong>\${html(comment.author || "unknown")}</strong>
+                <code>\${html(comment.body || "")}</code>
+              </span>
+            \`).join("") : '<span class="empty">No clarification comments received.</span>'}
+          </div>
+        \`;
       }
 
       function changedFileCount(diff) {
@@ -842,6 +872,10 @@ export function dashboardHtml() {
           <div class="detail-section">
             <h3>Plan</h3>
             <pre>\${jsonBlock(workflow.plan)}</pre>
+          </div>
+          <div class="detail-section">
+            <h3>Clarification</h3>
+            \${renderClarification(workflow)}
           </div>
           <div class="detail-section">
             <h3>Repository Inspection</h3>

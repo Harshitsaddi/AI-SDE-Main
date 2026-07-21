@@ -133,6 +133,88 @@ test("marks command implementation as needing clarification when the agent asks 
   assert.match(implementation.summary, /requested clarification/);
 });
 
+test("marks safe no-edit aider output as needing clarification", async () => {
+  const implementation = await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "openai",
+      aiModel: "gpt-5.4-mini",
+      aiApiKey: "sk-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: await workflow(),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "I can't safely make the requested change yet because the task is ambiguous relative to the only file I currently have in full. To proceed safely, please add the routing/navigation files.",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(implementation.applied, false);
+  assert.equal(implementation.needsClarification, true);
+  assert.match(implementation.stdout, /can't safely/);
+});
+
+test("marks one-clarification aider output as needing clarification", async () => {
+  const implementation = await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "openai",
+      aiModel: "gpt-5.4-mini",
+      aiApiKey: "sk-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: await workflow(),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "I need one clarification before I can safely edit: should I replace the current app.js module entirely or keep the existing functions and append browser UI code?",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(implementation.applied, false);
+  assert.equal(implementation.needsClarification, true);
+});
+
+test("does not treat ordinary safe-change output as clarification", async () => {
+  const implementation = await runCommandImplementation({
+    config: {
+      implementationCommand: "aider --yes --message-file {promptPath}",
+      implementationCommandAllowlist: ["aider"],
+      implementationCommandTimeoutMs: 1000,
+      aiProvider: "openai",
+      aiModel: "gpt-5.4-mini",
+      aiApiKey: "sk-test-key",
+      secretRedactionPatterns: []
+    },
+    workflow: await workflow(),
+    commandRunner: async (command, args, options) => ({
+      command,
+      args,
+      cwd: options.cwd,
+      exitCode: 0,
+      stdout: "Implemented the smallest safe change and updated tests.",
+      stderr: "",
+      timedOut: false
+    })
+  });
+
+  assert.equal(implementation.applied, true);
+  assert.equal(implementation.needsClarification, false);
+});
+
 test("requires an implementation command for command provider", async () => {
   await assert.rejects(
     () => runCommandImplementation({

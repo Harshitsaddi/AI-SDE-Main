@@ -41,6 +41,7 @@ export function createApp({
   pullRequestService = createPullRequest,
   ciStatusService = collectCiStatus,
   issueCommentService = publishIssueComment,
+  planService = generatePlan,
   aiSettingsStore
 }) {
   const appConfig = {
@@ -207,6 +208,32 @@ export function createApp({
     }
   }
 
+  async function replanWorkflowFromClarification(id) {
+    const workflow = store.get(id);
+
+    if (!workflow) {
+      return { ok: false, statusCode: 404, body: { error: "workflow_not_found" } };
+    }
+
+    const planningConfig = configForWorkflow(workflow);
+    const planningInput = workflow.planningInput;
+    const repositoryContext = await buildRepositoryContext(planningInput);
+    store.markReplanningStarted(id);
+    const plan = await planService({ config: planningConfig, planningInput, repositoryContext });
+    store.markReplanningCompleted(id, plan);
+    const updated = store.get(id);
+    await publishWorkflowComment(id, updated.status === "awaiting_clarification" ? "clarification" : "plan");
+
+    return {
+      ok: true,
+      statusCode: updated.status === "awaiting_clarification" ? 202 : 200,
+      body: {
+        status: updated.status,
+        workflow: updated
+      }
+    };
+  }
+
   async function handleGitHubWebhook(request, response) {
     let parsed;
 
@@ -250,9 +277,9 @@ export function createApp({
     const planningInput = issueEventToPlanningInput(payload);
     const planningConfig = configForRepository(activeConfig(), planningInput.repository.fullName);
     const repositoryContext = await buildRepositoryContext(planningInput);
-    const plan = await generatePlan({ config: planningConfig, planningInput, repositoryContext });
+    const plan = await planService({ config: planningConfig, planningInput, repositoryContext });
     const workflow = store.createFromPlan({ planningInput, plan });
-    await publishWorkflowComment(workflow.id, "plan");
+    await publishWorkflowComment(workflow.id, workflow.status === "awaiting_clarification" ? "clarification" : "plan");
 
     sendJson(response, 201, {
       status: workflow.status,
@@ -369,8 +396,50 @@ export function createApp({
 
   async function handleIssueCommentCommand(payload) {
     const command = issueCommentCommand(payload);
+    const id = issueCommentEventToWorkflowId(payload);
 
     if (!command) {
+      const workflow = store.get(id);
+
+      if (workflow?.status === "awaiting_clarification") {
+        const appendResult = store.appendClarificationComment(id, {
+          id: payload.comment?.id,
+          author: payload.comment?.user?.login || "",
+          body: payload.comment?.body || "",
+          url: payload.comment?.html_url || payload.comment?.url || "",
+          createdAt: payload.comment?.created_at || ""
+        });
+
+        if (!appendResult.ok) {
+          return {
+            statusCode: 409,
+            body: {
+              error: appendResult.reason,
+              workflow: appendResult.workflow || null
+            }
+          };
+        }
+
+        try {
+          return await replanWorkflowFromClarification(id);
+        } catch (error) {
+          store.markReplanningCompleted(id, {
+            status: "needs_clarification",
+            issueSummary: workflow.plan?.issueSummary || workflow.planningInput.issue.title,
+            clarificationQuestions: workflow.clarification?.questions || ["Please add more implementation detail."],
+            clarificationContext: `Replanning failed: ${error.message}`
+          });
+          await publishWorkflowComment(id, "clarification");
+          return {
+            statusCode: 202,
+            body: {
+              status: store.get(id).status,
+              workflow: store.get(id)
+            }
+          };
+        }
+      }
+
       return {
         statusCode: 202,
         body: {
@@ -380,7 +449,6 @@ export function createApp({
       };
     }
 
-    const id = issueCommentEventToWorkflowId(payload);
     const reviewer = payload.comment?.user?.login || "github-comment";
     const result = command === "approve"
       ? store.approve(id, { reviewer, comment: "Approved from GitHub issue comment." })

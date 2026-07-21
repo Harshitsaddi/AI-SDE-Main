@@ -123,6 +123,48 @@ test("normalizes hosted model plans when risk is missing", async () => {
   assert.deepEqual(plan.affectedAreas, ["src/auth.js"]);
 });
 
+test("accepts hosted model clarification requests", async () => {
+  const baseInput = planningInput();
+  const plan = await generateModelPlan({
+    config: {
+      aiProvider: "openai",
+      aiModel: "gpt-test",
+      aiApiKey: "sk-test",
+      secretRedactionPatterns: []
+    },
+    planningInput: {
+      ...baseInput,
+      issue: {
+        ...baseInput.issue,
+        clarificationComments: [
+          {
+            author: "sam",
+            body: "Use plain browser JavaScript.",
+            createdAt: "2026-07-21T10:00:00.000Z"
+          }
+        ]
+      }
+    },
+    repositoryContext: { candidateFiles: ["app.js"] },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_clarification",
+              summary: "The entrypoint is unclear.",
+              questions: ["Should app.js replace the existing module?"]
+            })
+          }
+        }
+      ]
+    }), { status: 200 })
+  });
+
+  assert.equal(plan.status, "needs_clarification");
+  assert.deepEqual(plan.clarificationQuestions, ["Should app.js replace the existing module?"]);
+});
+
 test("requires an API key for model providers", async () => {
   await assert.rejects(
     () => generateModelPlan({

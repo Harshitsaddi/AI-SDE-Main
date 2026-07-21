@@ -94,6 +94,8 @@ In the target repository:
 
 Open a test issue. The workflow should appear in the dashboard.
 
+If the issue is too vague for a safe plan, the workflow will show `awaiting_clarification`. AI SDE will post a clarification comment containing only blocking questions. Reply with one normal issue comment that adds the missing context; you do not need to answer each question one-by-one or use a special format. The app appends that comment to the planning context and automatically tries planning again. `/ai approve` and `/ai reject` still work as commands and are not used as clarification text.
+
 ## 5. Real GitHub Auth
 
 For quick testing with a fine-grained token:

@@ -36,13 +36,23 @@ export class WorkflowStore {
       `issue-${planningInput.issue.number || planningInput.issue.id || "unknown"}`
     ].join("#");
 
+    const needsClarification = plan.status === "needs_clarification" || plan.status === "awaiting_clarification";
     const workflow = {
       id,
-      status: "awaiting_approval",
+      status: needsClarification ? "awaiting_clarification" : "awaiting_approval",
       createdAt: now,
       updatedAt: now,
       planningInput,
       plan,
+      clarification: needsClarification
+        ? {
+          questions: plan.clarificationQuestions || [],
+          context: plan.clarificationContext || "",
+          comments: [],
+          requestedAt: now,
+          resolvedAt: null
+        }
+        : null,
       branch: null,
       workspace: null,
       repositoryInspection: null,
@@ -58,8 +68,10 @@ export class WorkflowStore {
       events: [
         {
           at: now,
-          type: "plan_generated",
-          message: "AI implementation plan generated and is awaiting human approval."
+          type: needsClarification ? "clarification_requested" : "plan_generated",
+          message: needsClarification
+            ? "AI planner requested clarification before creating an implementation plan."
+            : "AI implementation plan generated and is awaiting human approval."
         }
       ]
     };
@@ -139,6 +151,95 @@ export class WorkflowStore {
       at: now,
       type: "plan_approved",
       message: `Plan approved by ${approvalRecord.reviewer}.`
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  appendClarificationComment(id, comment) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    if (workflow.status !== "awaiting_clarification") {
+      return { ok: false, reason: "workflow_not_awaiting_clarification", workflow };
+    }
+
+    const now = new Date().toISOString();
+    const record = {
+      id: comment.id || null,
+      author: comment.author || "unknown",
+      body: comment.body || "",
+      url: comment.url || "",
+      createdAt: comment.createdAt || now,
+      receivedAt: now
+    };
+
+    workflow.updatedAt = now;
+    workflow.clarification = workflow.clarification || { questions: [], comments: [] };
+    workflow.clarification.comments = workflow.clarification.comments || [];
+    workflow.clarification.comments.push(record);
+    workflow.planningInput.issue.clarificationComments = workflow.clarification.comments;
+    workflow.events.push({
+      at: now,
+      type: "clarification_comment_received",
+      message: `Clarification comment received from ${record.author}.`
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markReplanningStarted(id) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+    workflow.status = "replanning";
+    workflow.updatedAt = now;
+    workflow.events.push({
+      at: now,
+      type: "replanning_started",
+      message: "Replanning with clarification context."
+    });
+
+    this.#save(workflow);
+    return { ok: true, workflow };
+  }
+
+  markReplanningCompleted(id, plan) {
+    const workflow = this.get(id);
+
+    if (!workflow) {
+      return { ok: false, reason: "workflow_not_found" };
+    }
+
+    const now = new Date().toISOString();
+    const needsClarification = plan.status === "needs_clarification" || plan.status === "awaiting_clarification";
+    workflow.status = needsClarification ? "awaiting_clarification" : "awaiting_approval";
+    workflow.updatedAt = now;
+    workflow.plan = plan;
+    workflow.clarification = {
+      ...(workflow.clarification || {}),
+      questions: needsClarification ? plan.clarificationQuestions || [] : workflow.clarification?.questions || [],
+      context: needsClarification ? plan.clarificationContext || "" : workflow.clarification?.context || "",
+      comments: workflow.clarification?.comments || [],
+      requestedAt: workflow.clarification?.requestedAt || now,
+      resolvedAt: needsClarification ? null : now
+    };
+    workflow.planningInput.issue.clarificationComments = workflow.clarification.comments;
+    workflow.events.push({
+      at: now,
+      type: needsClarification ? "clarification_requested" : "plan_generated",
+      message: needsClarification
+        ? "AI planner still needs clarification before creating an implementation plan."
+        : "AI implementation plan generated from clarification context and is awaiting human approval."
     });
 
     this.#save(workflow);

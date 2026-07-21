@@ -26,6 +26,7 @@ function renderCommandParts(parts, values) {
 }
 
 function plannerPrompt({ planningInput, repositoryContext }) {
+  const clarificationComments = planningInput.issue.clarificationComments || [];
   return [
     "# AI SDE Planning Task",
     "",
@@ -35,11 +36,19 @@ function plannerPrompt({ planningInput, repositoryContext }) {
     "",
     "## Issue Body",
     planningInput.issue.body || "No issue body provided.",
+    clarificationComments.length ? "" : "",
+    clarificationComments.length ? "## Clarification Comments" : "",
+    ...clarificationComments.map((comment, index) => (
+      `### Comment ${index + 1} by ${comment.author || "unknown"} at ${comment.createdAt || "unknown"}\n${comment.body}`
+    )),
     "",
     "## Repository Context",
     JSON.stringify(repositoryContext, null, 2),
     "",
-    "Return a JSON implementation plan with these fields: provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist."
+    "Return a JSON implementation plan with these fields: provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist.",
+    "If the issue lacks information required to make a safe implementation plan, return JSON with status: needs_clarification and clarificationQuestions: string[].",
+    "Ask only focused questions that block implementation.",
+    "If the issue body plus clarification comments provide enough context, return a normal implementation plan."
   ].filter(Boolean).join("\n");
 }
 

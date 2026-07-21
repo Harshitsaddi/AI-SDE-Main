@@ -29,6 +29,13 @@ export function parsePlanJson({ stdout, outputContent }) {
 }
 
 export function validatePlan(plan) {
+  if (plan.status === "needs_clarification" || plan.status === "awaiting_clarification") {
+    if (!Array.isArray(plan.clarificationQuestions) || plan.clarificationQuestions.length === 0) {
+      throw new Error("AI planner clarification response is missing array field: clarificationQuestions");
+    }
+    return;
+  }
+
   const requiredArrays = ["affectedAreas", "implementationPlan", "validationCommands", "humanReviewChecklist"];
 
   for (const field of ["issueSummary", "proposedBranchName", "risk"]) {

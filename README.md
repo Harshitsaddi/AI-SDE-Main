@@ -141,6 +141,8 @@ Dashboard API endpoints require `Authorization: Bearer <DASHBOARD_TOKEN>` when `
 
 Accepts GitHub `issues` and `issue_comment` events. For MVP, only `opened` issue actions create an implementation plan; issue edits are ignored to avoid duplicate workflows. `issue_comment` `created` events can approve or reject a workflow when the comment body is `/ai approve` or `/ai reject`.
 
+If the planner decides an issue is too vague, the workflow moves to `awaiting_clarification` instead of failing. The app posts a focused clarification comment with only blocking questions. Any normal issue comment on that workflow is appended as clarification context and triggers replanning automatically. Users can answer everything in one comment or simply add useful context; exact question-by-question formatting is not required. Slash commands such as `/ai approve` and `/ai reject` continue to use the approval flow and are not treated as clarification.
+
 Required headers:
 
 ```text
