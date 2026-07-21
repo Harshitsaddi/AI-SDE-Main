@@ -74,6 +74,10 @@ test("generates a command plan from stdout JSON", async () => {
   assert.equal(calls[0].command, "planner");
   assert.equal(calls[0].options.env.AI_SDE_PLAN_OUTPUT, generated.artifacts.outputPath);
   assert.match(prompt, /Fix login crash/);
+  assert.match(prompt, /Default to returning an implementation plan/);
+  assert.match(prompt, /Clarification is a last resort/);
+  assert.match(prompt, /Do not ask for confirmation or permission/);
+  assert.match(prompt, /multiple incompatible outcomes/);
   assert.equal(input.planningInput.repository.fullName, "acme/app");
 });
 

@@ -46,8 +46,10 @@ function plannerPrompt({ planningInput, repositoryContext }) {
     JSON.stringify(repositoryContext, null, 2),
     "",
     "Return a JSON implementation plan with these fields: provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist.",
-    "If the issue lacks information required to make a safe implementation plan, return JSON with status: needs_clarification and clarificationQuestions: string[].",
-    "Ask only focused questions that block implementation.",
+    "Default to returning an implementation plan. Clarification is a last resort, not the default.",
+    "Return JSON with status: needs_clarification and clarificationQuestions: string[] only when the requested outcome cannot be determined from the issue, clarification comments, repository context, and conservative engineering assumptions.",
+    "Do not ask for confirmation or permission to proceed. Do not ask whether to create files, edit files, add tests, or use a reasonable implementation approach.",
+    "Do not ask broad, preference, nice-to-have, or curiosity questions. Ask only focused questions that block implementation because multiple incompatible outcomes are equally plausible.",
     "If the issue body plus clarification comments provide enough context, return a normal implementation plan."
   ].filter(Boolean).join("\n");
 }

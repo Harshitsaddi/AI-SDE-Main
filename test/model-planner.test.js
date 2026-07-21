@@ -59,6 +59,12 @@ test("generates a plan from OpenAI-compatible chat completions", async () => {
   assert.equal(plan.proposedBranchName, "ai/issue-42");
   assert.equal(calls[0].url, "https://api.openai.com/v1/chat/completions");
   assert.equal(calls[0].options.headers.authorization, "Bearer sk-test");
+  const requestBody = JSON.parse(calls[0].options.body);
+  const prompt = requestBody.messages[1].content;
+  assert.match(prompt, /Default to returning an implementation plan/);
+  assert.match(prompt, /Clarification is a last resort/);
+  assert.match(prompt, /Do not ask for confirmation or permission/);
+  assert.match(prompt, /multiple incompatible outcomes/);
 });
 
 test("generates a plan from Anthropic messages", async () => {
@@ -163,6 +169,37 @@ test("accepts hosted model clarification requests", async () => {
 
   assert.equal(plan.status, "needs_clarification");
   assert.deepEqual(plan.clarificationQuestions, ["Should app.js replace the existing module?"]);
+});
+
+test("converts confirmation-only clarification requests into implementation plans", async () => {
+  const plan = await generateModelPlan({
+    config: {
+      aiProvider: "openai",
+      aiModel: "gpt-test",
+      aiApiKey: "sk-test",
+      secretRedactionPatterns: []
+    },
+    planningInput: planningInput(),
+    repositoryContext: { candidateFiles: ["index.html", "style.css", "script.js"] },
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              status: "needs_clarification",
+              summary: "Create a simple website.",
+              questions: ["Please confirm if I should proceed with creating index.html, style.css, and script.js."]
+            })
+          }
+        }
+      ]
+    }), { status: 200 })
+  });
+
+  assert.equal(plan.status, "plan_generated");
+  assert.equal(plan.issueSummary, "Create a simple website.");
+  assert.deepEqual(plan.affectedAreas, ["index.html", "style.css", "script.js"]);
+  assert.deepEqual(plan.clarificationQuestions, undefined);
 });
 
 test("requires an API key for model providers", async () => {

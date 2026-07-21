@@ -15,8 +15,10 @@ function planningPrompt({ planningInput, repositoryContext }) {
     "Return only valid JSON. Do not wrap the JSON in markdown.",
     "The JSON object must contain these fields:",
     "provider, status, issueSummary, proposedBranchName, risk, affectedAreas, implementationPlan, validationCommands, humanReviewChecklist.",
-    "If the issue lacks information required to make a safe implementation plan, return a JSON object with status: needs_clarification and clarificationQuestions: string[].",
-    "Ask only focused questions that block implementation. Do not ask broad or nice-to-have questions.",
+    "Default to returning an implementation plan. Clarification is a last resort, not the default.",
+    "Return status: needs_clarification only when the requested outcome cannot be determined from the issue, clarification comments, repository context, and conservative engineering assumptions.",
+    "Do not ask for confirmation or permission to proceed. Do not ask whether to create files, edit files, add tests, or use a reasonable implementation approach.",
+    "Do not ask broad, preference, nice-to-have, or curiosity questions. Ask only focused questions that block implementation because multiple incompatible outcomes are equally plausible.",
     "If the original issue plus clarification comments provide enough context, return a normal implementation plan even if the comment does not explicitly answer every previous question.",
     "risk must be a string with one of: low, medium, high.",
     "Use short, actionable strings in every array.",
@@ -71,11 +73,52 @@ function safeBranchName(planningInput) {
   return `ai/issue-${planningInput.issue.number || planningInput.issue.id || "unknown"}`;
 }
 
+function isConfirmationQuestion(question) {
+  const normalized = question.toLowerCase();
+
+  return [
+    "confirm",
+    "permission",
+    "proceed",
+    "go ahead",
+    "should i create",
+    "should i edit",
+    "should i add",
+    "would you like me",
+    "do you want me"
+  ].some((phrase) => normalized.includes(phrase));
+}
+
 function normalizeModelPlan({ plan, planningInput, repositoryContext }) {
-  const clarificationQuestions = stringArray(plan.clarificationQuestions, stringArray(plan.questions));
+  const clarificationQuestions = stringArray(plan.clarificationQuestions, stringArray(plan.questions))
+    .filter((question) => !isConfirmationQuestion(question));
   const status = firstString(plan.status);
 
   if (status === "needs_clarification" || status === "awaiting_clarification" || clarificationQuestions.length) {
+    if (!clarificationQuestions.length) {
+      return {
+        ...plan,
+        status: "plan_generated",
+        issueSummary: firstString(plan.issueSummary, plan.summary, planningInput.issue.title),
+        proposedBranchName: firstString(plan.proposedBranchName, plan.branchName) || safeBranchName(planningInput),
+        risk: firstString(plan.risk, plan.riskLevel, plan.riskAssessment) || "medium",
+        affectedAreas: stringArray(
+          plan.affectedAreas,
+          stringArray(plan.files, repositoryContext.candidateFiles || ["To be determined after repository checkout"])
+        ),
+        implementationPlan: stringArray(plan.implementationPlan, [
+          "Inspect the files related to the issue.",
+          "Make the smallest safe change that resolves the issue.",
+          "Add or update focused tests for the changed behavior."
+        ]),
+        validationCommands: stringArray(plan.validationCommands, ["npm test"]),
+        humanReviewChecklist: stringArray(plan.humanReviewChecklist, [
+          "Confirm the implementation matches the issue.",
+          "Confirm validation results are acceptable."
+        ])
+      };
+    }
+
     return {
       provider: plan.provider,
       status: "needs_clarification",
